@@ -1,42 +1,14 @@
 #pragma once
 
-#include <vector>
-#include <algorithm>
-#include <utility>
-#include <memory>
-#include <thread>
-#include <atomic>
-#include <mutex>
-#include <shared_mutex>
-#include <chrono>
-#include <cassert>
-#include <iostream>
+#include "../includes/stdlibs.hpp"
 
 #include "memory_manager.hpp"
 #include "../includes/context.hpp"
 #include "../includes/memory_status.hpp"
+#include "../includes/memory_schedule_event.hpp"
 #include "../includes/logging.hpp"
 
 namespace mori {
-
-enum class ScheduleEventType {
-    allocate, 
-    copyin, copyout, 
-    swapin, swapout, 
-    freedev, freehost, 
-    free
-};  // enum ScheduleEventType
-
-struct ScheduleEvent {
-    std::string operator_name;
-    std::string tensor_name;
-
-    int interval;
-    ScheduleEventType type;
-
-    ScheduleEvent(): operator_name(""), tensor_name(""), interval(0), type(ScheduleEventType::allocate) {}
-    ScheduleEvent(const std::string& _operator_name, const std::string& _tensor_name, int _interval, ScheduleEventType _type): operator_name(_operator_name), tensor_name(_tensor_name), interval(_interval), type(_type) {}
-};  // struct ScheduleEvent
 
 struct MemoryScheduleExecutor {
 protected:
@@ -184,6 +156,7 @@ protected:
     }
 
     void doSwapOutMemory(const std::string& operator_name, const std::string& tensor_name) {
+
         doCopyOutMemory(operator_name, tensor_name);
         doFreeDeviceMemory(operator_name, tensor_name);
     }
@@ -222,10 +195,13 @@ protected:
     virtual void resetExecutionInterval() =0;
 
     virtual void onNextIteration() {
+        logger->submit(LogLevel::debug, "Memory schedule executor moves to next iteration.");
         resetExecutionInterval();
     }
 
-    virtual void onNextOperator() {}
+    virtual void onNextOperator() {
+        logger->submit(LogLevel::debug, "Memory schedule executor moves to next operator.");
+    }
 
     /**
      * onMemoryInsufficient
@@ -233,9 +209,10 @@ protected:
      * Here a LRU algorithm is leveraged.
      */
     virtual void onMemoryInsufficient(size_t size) {
+        logger->submit(LogLevel::debug, "Memory insufficient.");
         for (auto &op : memory_status->exec_order) {
             bool hosted = true;
-            for (auto &tensor_status : memory_status->at(op).tensor_status) {
+            for (auto &tensor_status : memory_status->at(op)) {
                 if (tensor_status.second.data_status == MemoryDataStatusType::host) continue;
                 hosted = false;
             }
@@ -243,8 +220,10 @@ protected:
             if (hosted) continue;
 
             // Swap out this operator
-            for (auto &tensor_status : memory_status->at(op).tensor_status) {
+            for (auto &tensor_status : memory_status->at(op)) {
                 doSwapOutMemory(op, tensor_status.first);
+                (*logger)<<LogLevel::debug<<"Operator "<<op<<": tensor "<<tensor_status.first<<" swapped out. (On demand)";
+                logger->flush();
             }
             
             return;
@@ -270,6 +249,7 @@ public:
     }
 
     void setLogger(Logger* _logger) {
+        if (inited) throw std::exception();
         logger = _logger;
     }
 
@@ -306,9 +286,13 @@ public:
                             break;
                         case ScheduleEventType::swapin:
                             doSwapInMemory(operator_name, tensor_name);
+                            (*logger)<<LogLevel::debug<<"Operator "<<operator_name<<": tensor "<<tensor_name<<" swapped in. (Prefetch)";
+                            logger->flush();
                             break;
                         case ScheduleEventType::swapout:
                             doSwapOutMemory(operator_name, tensor_name);
+                            (*logger)<<LogLevel::debug<<"Operator "<<operator_name<<": tensor "<<tensor_name<<" swapped out. (Instant)";
+                            logger->flush();
                             break;
                         case ScheduleEventType::freehost:
                             doFreeHostMemory(operator_name, tensor_name);
@@ -329,15 +313,19 @@ public:
         }, this);
         // Examine if the thread starts properly
         while (!executor_thread.joinable());
+
+        logger->submit(LogLevel::debug, "Memory schedule executor initialized.");
     }
 
     void updateSchedule(const std::vector<ScheduleEvent>& new_event_set) {
         std::unique_lock<std::shared_mutex>{events_mutex};
         eventset = new_event_set;
+        logger->submit(LogLevel::debug, "Memory schedule executor receives new schedule event set.");
     }
     void updateSchedule(std::vector<ScheduleEvent>&& new_event_set) {
         std::unique_lock<std::shared_mutex>{events_mutex};
         eventset = new_event_set;
+        logger->submit(LogLevel::debug, "Memory schedule executor receives new schedule event set.");
     }
 
     void nextIteration() {

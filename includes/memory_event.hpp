@@ -1,7 +1,6 @@
 #pragma once
 
-#include <string>
-#include <chrono>
+#include "stdlibs.hpp"
 
 namespace mori {
 
@@ -40,6 +39,34 @@ struct MemoryEvent {
     MemoryEvent& operator=(const MemoryEvent& event) = default;
 
     bool operator<(const MemoryEvent& event) const {return timestamp < event.timestamp;}
+
+    operator std::string() const {
+        std::string typestr;
+        switch (type) {
+            case allocate:
+                typestr = "allocate";
+                break;
+            case write:
+                typestr = "write";
+                break;
+            case read:
+                typestr = "read";
+                break;
+            case access:
+                typestr = "access";
+                break;
+            case free:
+                typestr = "free";
+                break;
+            default:
+                typestr = "access";
+                break;
+        }
+
+        std::stringstream ss;
+        ss<<"Timestamp: "<<std::chrono::duration_cast<std::chrono::milliseconds>(timestamp.time_since_epoch()).count()<<" operator: "<<op<<" tensor: "<<tensor<<" type: "<<typestr;
+        return ss.str();
+    }
 
 };  // struct MemoryEvents
 

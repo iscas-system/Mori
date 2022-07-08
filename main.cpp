@@ -5,17 +5,19 @@
 #include <cassert>
 #include <thread>
 
-#include "includes/context.hpp"
-#include "frontend/frontend.hpp"
-#include "frontend/memory_manager.hpp"
+#include "libmori.hpp"
 #include "demo_memory_manager.hpp"
 
 int main(int argc, char** argv) {
     mori::Context context;
     DemoMemoryManager mem_manager;
+    mori::StdIOLogger logger;
+
+    context["path"] = "dylib://libmori.so";
 
     mori::Frontend frontend(context);
     frontend.setMemoryManager(&mem_manager);
+    frontend.setLogger(&logger);
 
     std::unordered_map<std::string, mori::TensorStatus> tensor_status;
     tensor_status.insert(std::make_pair("t", mori::TensorStatus("t", 1024, mori::MemoryType::all)));
@@ -58,18 +60,21 @@ int main(int argc, char** argv) {
     session.withData("o3", []() {
         std::cout<<"o3\n";
     });
+    session.setMemoryDataAcquired("o3", "t");
     session.freeMemory("o3", "t");
 
     // Backward propagation op2
     session.withData("o2", []() {
         std::cout<<"o2\n";
     });
+    session.setMemoryDataAcquired("o2", "t");
     session.freeMemory("o2", "t");
 
     // Backward propagation op1
     session.withData("o1", []() {
         std::cout<<"o1\n";
     });
+    session.setMemoryDataAcquired("o1", "t");
     session.freeMemory("o1", "t");
 
     session.terminate();

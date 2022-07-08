@@ -1,8 +1,6 @@
 #pragma once
 
-#include <string>
-#include <memory>
-#include <utility>
+#include "../includes/stdlibs.hpp"
 
 #include "memory_session.hpp"
 #include "memory_schedule_executor.hpp"
@@ -31,7 +29,8 @@ protected:
     // Each frontend holds one memory session.
     MemorySession session;
     std::shared_ptr<MemoryScheduleExecutor> executor;
-
+    
+    Logger empty_logger;
     Logger* logger = nullptr;
 
     bool inited = false;
@@ -51,6 +50,8 @@ public:
         session.setBackendHandle(std::weak_ptr<BackendHandle>(backend_handle));
         session.setMemoryStatusStorage(&memory_status);
         session.setExecutor(executor);
+
+        logger = &empty_logger;
     }
 
     /**
@@ -66,7 +67,13 @@ public:
     }
 
     void setLogger(Logger* _logger) {
+        if (inited) throw std::exception();
+        if (_logger == nullptr) logger = &empty_logger;
         logger = _logger;
+
+        backend_handle->setLogger(logger);
+        session.setLogger(logger);
+        executor->setLogger(logger);
     }
 
     void init() {
@@ -79,12 +86,9 @@ public:
         
         backend_handle->init();
 
-        auto&& event_set = backend_handle->getScheduleEvents();
-        executor->setMemoryStatuses(&memory_status);
-        executor->updateSchedule(event_set);
-        executor->setLogger(logger);
-
         inited = true;
+
+        logger->submit(LogLevel::debug, "Mori frontend inited.");
     }
 
     bool isInited() {return inited;}
@@ -95,15 +99,26 @@ public:
      * @param operator_status information of the operator to be registered.
      */
     void registerOperator(const OperatorStatus& operator_status) {
-        if (!inited) throw std::exception();
+        if (!inited) {
+            (*logger)<<LogLevel::error<<"Registering operator "<<operator_status.name<<" while frontend not initialized.";
+            logger->flush();
+            throw std::exception();
+        }
 
         memory_status.registerOperator(operator_status);
         backend_handle->registerOperator(operator_status);
+
+        (*logger)<<LogLevel::info<<"Operator "<<operator_status.name<<" registered.";
+        logger->flush();
         
     }
 
     MemorySession& getSession() {
-        if (!inited) throw std::exception();
+        if (!inited) {
+            (*logger)<<LogLevel::error<<"Referencing to session from uninitialized frontend.";
+            logger->flush();
+            throw std::exception();
+        }
         return session;
     }
 

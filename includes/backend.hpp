@@ -1,7 +1,8 @@
 #pragma once
 
 #include "memory_event.hpp"
-#include "../frontend/memory_schedule_executor.hpp"
+#include "memory_schedule_event.hpp"
+#include "memory_status.hpp"
 
 namespace mori {
 

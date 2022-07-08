@@ -1,14 +1,6 @@
 #pragma once
 
-#include <atomic>
-#include <mutex>
-#include <shared_mutex>
-#include <memory>
-#include <string>
-#include <unordered_set>
-#include <chrono>
-#include <cassert>
-#include <exception>
+#include "../includes/stdlibs.hpp"
 
 #include "backend_handle.hpp"
 #include "memory_schedule_executor.hpp"
@@ -36,6 +28,8 @@ protected:
 
     bool inited = false;
 
+    Logger* logger;
+
 public:
     MemorySession(const Context& _context): context(_context) {}
 
@@ -59,6 +53,11 @@ public:
         memory_manager = _memory_manager;
     }
 
+    void setLogger(Logger* _logger) {
+        if (inited) throw std::exception();
+        logger = _logger;
+    }
+
     void init() {
         if (inited) throw std::exception();
 
@@ -80,7 +79,7 @@ public:
      * @param tensor tensor name
      * @param size allocation size
      */
-    void* allocateMemory(const std::string& op, const std::string& tensor) {
+    void allocateMemory(const std::string& op, const std::string& tensor) {
         if (!inited) throw std::exception();
 
         void* dev_addr = nullptr;
@@ -108,7 +107,6 @@ public:
         // emit memory event
         backend_handle.lock()->submitEvent(MemoryEvent(op, tensor, MemoryEventType::allocate));
 
-        return dev_addr;
     }
 
     void setMemoryDataAssigned(const std::string& op, const std::string& tensor) {
@@ -116,30 +114,93 @@ public:
             
         TensorStatus& tensor_status = (*memory_status)[op][tensor];
         std::unique_lock<std::shared_mutex>{tensor_status.status_mutex};
-        if (tensor_status.data_status != MemoryDataStatusType::empty) throw std::exception();
+        
+        switch (tensor_status.data_status) {
+            case none:
+            case host:
+                (*logger)<<LogLevel::error<<"Assigning of operator "<<op<<": tensor "<<tensor_status.name<<" that not exists or exists on host.";
+                logger->flush();
+                throw std::exception();
+                break;
+            case swapin:
+            case swapout:
+                (*logger)<<LogLevel::warning<<"Assigning of operator "<<op<<": tensor "<<tensor_status.name<<" that is swapping.";
+                logger->flush();
+            case empty:
+            case device:
+            case coexist:
+            default:
+                break;
+        }
 
         tensor_status.data_status = MemoryDataStatusType::device;
+
+        // emit memory event
+        backend_handle.lock()->submitEvent(MemoryEvent(op, tensor, MemoryEventType::write));
     }
 
     /**
-     * emitEvent
-     * Emit a memory event with current timestamp.
-     * @param event memory event
+     * setMemoryDataAcquired
+     * Set the memory data is acquired, or read.
+     * @param op operator name
+     * @param tensor tensor name
      */
-    void emitEvent(const MemoryEvent& event) {
+    void setMemoryDataAcquired(const std::string& op, const std::string& tensor) {
         if (!inited) throw std::exception();
-        backend_handle.lock()->submitEvent(event);
+
+        TensorStatus& tensor_status = (*memory_status)[op][tensor];
+        std::unique_lock<std::shared_mutex>{tensor_status.status_mutex};
+
+        switch (tensor_status.data_status) {
+            case none:
+            case host:
+                (*logger)<<LogLevel::error<<"Acquiring of operator "<<op<<": tensor "<<tensor_status.name<<" that not exists or exists on host.";
+                logger->flush();
+                throw std::exception();
+                break;
+            case swapin:
+            case swapout:
+                (*logger)<<LogLevel::warning<<"Acquiring of operator "<<op<<": tensor "<<tensor_status.name<<" that is swapping.";
+                logger->flush();
+            case empty:
+            case device:
+            case coexist:
+            default:
+                break;
+        }
+
+        // emit memory event
+        backend_handle.lock()->submitEvent(MemoryEvent(op, tensor, MemoryEventType::read));
     }
 
-    /**
-     * emitEvent
-     * Emit a memory event with current timestamp.
-     * @param op name of the operator
-     * @param tensor name of the tensor
-     * @param event_type memory event type
-     */
-    void emitEvent(const std::string& op, const std::string& tensor, MemoryEventType event_type) {
-        emitEvent(MemoryEvent(op, tensor, event_type));
+    void setMemoryDataAccessed(const std::string& op, const std::string& tensor) {
+        if (!inited) throw std::exception();
+
+        TensorStatus& tensor_status = (*memory_status)[op][tensor];
+        std::unique_lock<std::shared_mutex>{tensor_status.status_mutex};
+
+        switch (tensor_status.data_status) {
+            case none:
+            case host:
+                (*logger)<<LogLevel::error<<"Accessing of operator "<<op<<": tensor "<<tensor_status.name<<" that not exists or exists on host.";
+                logger->flush();
+                throw std::exception();
+                break;
+            case swapin:
+            case swapout:
+                (*logger)<<LogLevel::warning<<"Accessing of operator "<<op<<": tensor "<<tensor_status.name<<" that is swapping.";
+                logger->flush();
+            case empty:
+            case device:
+            case coexist:
+            default:
+                break;
+        }
+
+        tensor_status.data_status = MemoryDataStatusType::device;
+
+        // emit memory event
+        backend_handle.lock()->submitEvent(MemoryEvent(op, tensor, MemoryEventType::access));
     }
 
     int getIteration() {
@@ -159,7 +220,7 @@ public:
     bool isMemoryReady(const std::string& op) {
         if (!inited) throw std::exception();
 
-        for (const auto& x : memory_status->at(op).tensor_status) {
+        for (const auto& x : memory_status->at(op)) {
             if (x.second.data_status != MemoryDataStatusType::device) return false;
         }
         return true;
@@ -191,7 +252,7 @@ public:
         auto& op_status = (*memory_status)[op];
         std::unique_lock(op_status.status_mutex);
 
-        for (auto& x : op_status.tensor_status) tensors_not_ready.insert(x.first);
+        for (auto& x : op_status) tensors_not_ready.insert(x.first);
 
         bool tensors_ready = false;
         while (!tensors_ready) {
@@ -199,19 +260,33 @@ public:
 
             auto p = tensors_not_ready.begin();
             while (p != tensors_not_ready.end()) {
-                auto& tensor_status = op_status.tensor_status[*p];
-                if (tensor_status.data_status == MemoryDataStatusType::device) p = tensors_not_ready.erase(p);
-                else {
-                    tensors_ready = false;
+                auto& tensor_status = op_status[*p];
+                switch (tensor_status.data_status) {
+                    case MemoryDataStatusType::empty:
+                    case MemoryDataStatusType::device:
+                    case MemoryDataStatusType::coexist:
+                        p = tensors_not_ready.erase(p);
+                        break;
+                    case MemoryDataStatusType::none:
+                        throw std::exception();
+                    case MemoryDataStatusType::host:
+                    case MemoryDataStatusType::swapin:
+                    case MemoryDataStatusType::swapout:
+                    default:
+                        tensors_ready = false;
 
-                    if (tensor_status.data_status != MemoryDataStatusType::host) throw std::exception();
+                        if (tensor_status.data_status != MemoryDataStatusType::host) throw std::exception();
 
-                    tensor_status.data_status = MemoryDataStatusType::swapin;
-                    auto device_address = memory_manager->swapIn(tensor_status.host_address, tensor_status.size);
-                    tensor_status.device_address = device_address;
-                    tensor_status.data_status = MemoryDataStatusType::device;
+                        tensor_status.data_status = MemoryDataStatusType::swapin;
+                        auto device_address = memory_manager->swapIn(tensor_status.host_address, tensor_status.size);
+                        tensor_status.device_address = device_address;
+                        tensor_status.data_status = MemoryDataStatusType::device;
 
-                    ++p;
+                        (*logger)<<LogLevel::debug<<"Operator "<<op<<": tensor "<<tensor_status.name<<" swapped in. (Memory access)";
+                        logger->flush();
+
+                        ++p;
+                        break;
                 }
             }
         }
@@ -274,6 +349,8 @@ public:
 
     void terminate() {
         if (!inited) throw std::exception();
+        logger = nullptr;
+        
         inited = false;
         executor.lock()->terminate();
     }

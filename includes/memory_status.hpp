@@ -1,9 +1,6 @@
 #pragma once
 
-#include <unordered_map>
-#include <vector>
-#include <string>
-#include <shared_mutex>
+#include "stdlibs.hpp"
 
 namespace mori {
 
@@ -78,61 +75,76 @@ struct TensorStatus {
  * Memory status of an operator.
  */
 struct OperatorStatus {
+    using iterator = std::unordered_map<std::string, TensorStatus>::iterator;
+    using const_iterator = std::unordered_map<std::string, TensorStatus>::const_iterator;
+
     // These three variables be regarded as const variables.
     std::string name;
     // The prev and post operators in the graph.
     std::vector<std::string> prevs, posts;
 
-    std::unordered_map<std::string, TensorStatus> tensor_status;
+    std::unordered_map<std::string, TensorStatus> status;
 
     std::shared_mutex status_mutex;
 
-    OperatorStatus(): name(""), prevs({}), posts({}), tensor_status({}) {}
+    OperatorStatus(): name(""), prevs({}), posts({}), status({}) {}
 
-    OperatorStatus(const std::string& _name, const std::vector<std::string>& _prevs, const std::vector<std::string>& _posts, const std::unordered_map<std::string, TensorStatus>& _tensor_status): name(_name), prevs(_prevs), posts(_posts), tensor_status(_tensor_status) {}
+    OperatorStatus(const std::string& _name, const std::vector<std::string>& _prevs, const std::vector<std::string>& _posts, const std::unordered_map<std::string, TensorStatus>& _status): name(_name), prevs(_prevs), posts(_posts), status(_status) {}
 
-    OperatorStatus(const OperatorStatus& status) {
-        name = status.name;
-        prevs = status.prevs;
-        posts = status.posts;
-        tensor_status = status.tensor_status;
+    OperatorStatus(const OperatorStatus& op_status) {
+        name = op_status.name;
+        prevs = op_status.prevs;
+        posts = op_status.posts;
+        status = op_status.status;
     }
 
-    OperatorStatus(OperatorStatus&& status) {
-        name = std::move(status.name);
-        prevs = std::move(status.prevs);
-        posts = std::move(status.posts);
-        tensor_status = std::move(status.tensor_status);
+    OperatorStatus(OperatorStatus&& op_status) {
+        name = std::move(op_status.name);
+        prevs = std::move(op_status.prevs);
+        posts = std::move(op_status.posts);
+        status = std::move(op_status.status);
     }
 
     std::vector<std::string> getPrevs() { return prevs; }
     std::vector<std::string> getPosts() { return posts; }
 
-    void operator=(const OperatorStatus& status) {
-        name = status.name;
-        prevs = status.prevs;
-        posts = status.posts;
-        tensor_status = status.tensor_status;
+    void operator=(const OperatorStatus& op_status) {
+        name = op_status.name;
+        prevs = op_status.prevs;
+        posts = op_status.posts;
+        status = op_status.status;
     }
 
-    void operator=(OperatorStatus&& status) {
-        name = std::move(status.name);
-        prevs = std::move(status.prevs);
-        posts = std::move(status.posts);
-        tensor_status = std::move(status.tensor_status);
+    void operator=(OperatorStatus&& op_status) {
+        name = std::move(op_status.name);
+        prevs = std::move(op_status.prevs);
+        posts = std::move(op_status.posts);
+        status = std::move(op_status.status);
+    }
+
+    bool isTensorRegistered(const std::string& tensor) {
+        // Shared lock operator status mutex, since no object insert / erase takes place.
+        std::shared_lock<std::shared_mutex>{status_mutex};
+        auto p = status.find(tensor);
+        return p != status.end();
     }
 
     TensorStatus& operator[](const std::string& tensor) {
-        return tensor_status[tensor];
+        return status[tensor];
     }
 
     TensorStatus& at(const std::string& tensor) {
-        return tensor_status.at(tensor);
+        return status.at(tensor);
     }
 
     const TensorStatus& at(const std::string& tensor) const {
-        return tensor_status.at(tensor);
+        return status.at(tensor);
     }
+
+    iterator begin() {return status.begin();}
+    const_iterator cbegin() {return status.cbegin();}
+    iterator end() {return status.end();}
+    const_iterator cend() {return status.cend();}
 
 };  // struct OperatorStatus
 
@@ -141,7 +153,10 @@ struct OperatorStatus {
  * Provide a storage for memory status based on operator name.
  */
 struct MemoryStatuses {
-    std::unordered_map<std::string, OperatorStatus> operator_status;
+    using iterator = std::unordered_map<std::string, OperatorStatus>::iterator;
+    using const_iterator = std::unordered_map<std::string, OperatorStatus>::const_iterator;
+
+    std::unordered_map<std::string, OperatorStatus> status;
     std::vector<std::string> exec_order;
     std::string operators_entry, operators_end;
 
@@ -153,17 +168,17 @@ struct MemoryStatuses {
 
     // void operator=(const MemoryStatuses&) = default;
     // void operator=(MemoryStatuses&& status) {
-    //     operator_status = move(status.operator_status);
+    //     status = move(status.status);
     // }
 
     void registerOperator(const OperatorStatus& opstatus) {
         std::unique_lock<std::shared_mutex>{status_mutex};
-        auto p = operator_status.find(opstatus.name);
-        if (p != operator_status.end()) throw std::exception();
+        auto p = status.find(opstatus.name);
+        if (p != status.end()) throw std::exception();
 
         exec_order.push_back(opstatus.name);
 
-        operator_status.insert(std::make_pair(opstatus.name, opstatus));
+        status.insert(std::make_pair(opstatus.name, opstatus));
     }
 
     void completeComputationGraph() {
@@ -174,13 +189,13 @@ struct MemoryStatuses {
         // Shared lock storage status mutex, since no object insert / erase takes place.
         std::shared_lock<std::shared_mutex>{status_mutex};
         
-        auto& op_status = operator_status.at(op);
+        auto& op_status = status.at(op);
         // Shared lock operator status mutex, since no object insert / erase takes place.
-        std::shared_lock(op_status.status_mutex);
+        std::shared_lock<std::shared_mutex>{op_status.status_mutex};
 
         auto& tensor_status = op_status.at(tensor);
         // Unique lock tensor status mutex, since status update.
-        std::unique_lock(tensor_status.status_mutex);
+        std::unique_lock<std::shared_mutex>{tensor_status.status_mutex};
         tensor_status.data_status = data_status;
     }
 
@@ -188,7 +203,7 @@ struct MemoryStatuses {
         // Shared lock storage status mutex, since no object insert / erase takes place.
         std::shared_lock<std::shared_mutex>{status_mutex};
         
-        OperatorStatus& op_status = operator_status.at(op);
+        OperatorStatus& op_status = status.at(op);
         // Shared lock operator status mutex, since no object insert / erase takes place.
         std::shared_lock<std::shared_mutex>{op_status.status_mutex};
 
@@ -200,41 +215,43 @@ struct MemoryStatuses {
 
     bool isOperatorRegistered(const std::string& op) {
         std::shared_lock<std::shared_mutex>{status_mutex};
-        auto p = operator_status.find(op);
-        return p != operator_status.end();
+        auto p = status.find(op);
+        return p != status.end();
     }
 
     bool isTensorRegistered(const std::string& op, const std::string& tensor) {
         // Shared lock operator status mutex, since no object insert / erase takes place.
         std::shared_lock<std::shared_mutex>{status_mutex};
-        auto p = operator_status.find(op);
-        if (p != operator_status.end()) return false;
+        auto p = status.find(op);
+        if (p != status.end()) return false;
 
-        // Shared lock operator status mutex, since no object insert / erase takes place.
-        std::shared_lock<std::shared_mutex>{p->second.status_mutex};
-        auto q = p->second.tensor_status.find(tensor);
-        return q != p->second.tensor_status.end();
+        return p->second.isTensorRegistered(tensor);
     }
 
     OperatorStatus& operator[](const std::string& op) {
-        return operator_status[op];
+        return status[op];
     }
 
     OperatorStatus& at(const std::string& op) {
-        return operator_status.at(op);
+        return status.at(op);
     }
 
     const OperatorStatus& at(const std::string& op) const {
-        return operator_status.at(op);
+        return status.at(op);
     }
 
     void unregisterOperator(const std::string& op) {
         std::unique_lock<std::shared_mutex>{status_mutex};
-        auto p = operator_status.find(op);
-        if (p == operator_status.end()) throw std::exception();
+        auto p = status.find(op);
+        if (p == status.end()) throw std::exception();
 
-        operator_status.erase(p);
+        status.erase(p);
     }
+
+    iterator inline begin() {return status.begin();}
+    const_iterator inline cbegin() {return status.cbegin();}
+    iterator inline end() {return status.end();}
+    const_iterator inline cend() {return status.cend();}
 
     ~MemoryStatuses() = default;
 

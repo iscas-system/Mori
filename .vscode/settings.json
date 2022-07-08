@@ -80,7 +80,9 @@
         "numeric": "cpp",
         "queue": "cpp",
         "stack": "cpp",
-        "valarray": "cpp"
+        "valarray": "cpp",
+        "cassert": "cpp",
+        "*.txt": "cpp"
     },
     "C_Cpp.errorSquiggles": "Disabled"
 }

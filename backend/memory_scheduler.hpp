@@ -3,10 +3,12 @@
 #include <string>
 #include <atomic>
 #include <mutex>
+#include <iostream>
 #include <condition_variable>
 
 #include "../includes/backend.hpp"
 #include "../includes/memory_event.hpp"
+#include "../includes/memory_schedule_event.hpp"
 
 namespace mori {
 
@@ -68,6 +70,16 @@ struct MemoryScheduler {
         return std::vector<ScheduleEvent>();
     }
 
+    virtual void submitEvent(MemoryEvent event) {
+        if (!inited) throw std::exception();
+        onMemoryEvent(event);
+    }
+
+    virtual void increaseIteration() {
+        if (!inited) throw std::exception();
+        onIncreaseIteration();
+    }
+
     virtual void terminate() {
         if (!inited) throw std::exception();
         inited = false;
@@ -81,7 +93,7 @@ struct MemoryScheduler {
 };  // struct MemoryScheduler
 
 struct FIFOMemoryScheduler : public MemoryScheduler {
-    virtual void init() {}
+    virtual void init() {MemoryScheduler::init();}
 
     virtual void schedule() {}
 
@@ -92,7 +104,7 @@ struct FIFOMemoryScheduler : public MemoryScheduler {
 };  // struct FIFOMemoryScheduler
 
 struct DependencyAwareMemoryScheduler: public MemoryScheduler {
-    virtual void init() {}
+    virtual void init() {MemoryScheduler::init();}
 
     virtual void schedule() {}
 
@@ -103,7 +115,7 @@ struct DependencyAwareMemoryScheduler: public MemoryScheduler {
 };  // struct DependencyAwareMemoryScheduler
 
 struct MaximumSizePriorityMemoryScheduler: public MemoryScheduler {
-    virtual void init() {}
+    virtual void init() {MemoryScheduler::init();}
 
     virtual void schedule() {}
 
@@ -113,7 +125,7 @@ struct MaximumSizePriorityMemoryScheduler: public MemoryScheduler {
 };  // struct MaximumSizePriorityMemoryScheduler
 
 struct RWAwareMemoryScheduler: public MemoryScheduler {
-    virtual void init() {}
+    virtual void init() {MemoryScheduler::init();}
 
     virtual void schedule() {}
 

@@ -16,6 +16,7 @@
 #include "memory_scheduler.hpp"
 #include "../includes/memory_status.hpp"
 #include "../includes/backend.hpp"
+#include "../includes/context.hpp"
 #include "../includes/memory_event.hpp"
 
 namespace mori {
@@ -31,7 +32,7 @@ struct BasicBackend final : public Backend {
     Context context;
 
     MemoryStatuses memory_status;
-    EventStorage events;
+    Events events;
 
     std::unique_ptr<MemoryScheduler> scheduler;
     void* hInst = nullptr;
@@ -95,27 +96,18 @@ struct BasicBackend final : public Backend {
     }
 
     virtual void registerOperator(const OperatorStatus& operator_status) {
+        if (!inited) throw std::exception();
+
         if (memory_status.isOperatorRegistered(operator_status.name)) throw std::exception();
 
-        // // Operator or tensor not registered
-        // TensorStatus tensor_status;
-        // tensor_status.address = event.address;
-        // tensor_status.size = event.size;
-        // tensor_status.type = MemoryType::all;
-        // tensor_status.data_status = MemoryDataStatusType::nonexist;
-        // memory_status.submitMemoryStatus(event.op, event.tensor, tensor_status);
+        memory_status.registerOperator(operator_status);
     }
 
     virtual void submitEvent(const MemoryEvent& event) {
-        // Step 1: Register the operator memory information
-        
-        // Step 2: Submit event
+        if (!inited) throw std::exception();
+
         events.submitEvent(event);
-
-        // Step 3: Update the operator memory information
-
-        // Step 4: Submit the event to scheduler
-        scheduler->onMemoryEvent(event);
+        scheduler->submitEvent(event);
     }
 
     virtual std::vector<ScheduleEvent> getScheduleEvents() {
@@ -140,20 +132,16 @@ struct BasicBackend final : public Backend {
     virtual int increaseIteration() {
         ++iteration;
         // Block to synchorize with scheduler.
-        scheduler->onIncreaseIteration();
+        scheduler->increaseIteration();
         return iteration;
     }
 
     virtual void unregisterOperator(const std::string& op) {
+        if (!inited) throw std::exception();
+
         if (!memory_status.isOperatorRegistered(op)) throw std::exception();
 
-        // // Operator or tensor not registered
-        // TensorStatus tensor_status;
-        // tensor_status.address = event.address;
-        // tensor_status.size = event.size;
-        // tensor_status.type = MemoryType::all;
-        // tensor_status.data_status = MemoryDataStatusType::nonexist;
-        // memory_status.submitMemoryStatus(event.op, event.tensor, tensor_status);
+        memory_status.unregisterOperator(op);
     }
 
     virtual void terminate() {

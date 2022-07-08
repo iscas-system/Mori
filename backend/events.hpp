@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <set>
 #include <map>
@@ -10,24 +11,53 @@
 namespace mori {
 
 struct EventSet {
-    const std::set<MemoryEvent>& events;
-    const std::string select_cond;
-    EventSet(const std::set<MemoryEvent>& _events): events(_events) {}
+    std::multimap<int, MemoryEvent> events;
+    
+    EventSet() {}
+    EventSet(const std::multimap<int, MemoryEvent>& _events): events(_events) {}
 
-    // EventSet select(const std::string& cond) const {
-    //     return EventSet();
-    // }
+    EventSet(const EventSet& event_set) {
+        events = event_set.events;
+    }
+    EventSet(EventSet&& event_set) {
+        events = std::move(event_set.events);
+    }
 
-    // EventSet where(const std::string& cond) const {
-    //     return EventSet();
-    // }
+    void operator=(const EventSet& event_set) {
+        events = event_set.events;
+    }
+
+    void operator=(EventSet&& event_set) {
+        events = std::move(event_set.events);
+    }
+
+    EventSet select(const std::string& cond) const {
+        return EventSet();
+    }
+
+    EventSet where(const std::function<bool(const MemoryEvent&)> f) const {
+        std::multimap<int, MemoryEvent> re;
+        for (auto &x : events) {
+            if (f(x.second)) re.insert(std::make_pair(x.first, x.second));
+        }
+        return EventSet(re);
+    }
+
+    EventSet where(int iter) const {
+        auto p = events.lower_bound(iter);
+        auto q = events.upper_bound(iter);
+        if (p == q) return EventSet();
+        return EventSet(std::multimap<int, MemoryEvent>(p, q));
+    }
 
     // EventSet get() const {
     //     return EventSet();
     // }
+
+    ~EventSet() {}
 };  // struct EventSet
 
-struct EventStorage {
+struct Events {
     int iteration = 0;
     std::multimap<int, MemoryEvent> events;
 
@@ -39,14 +69,26 @@ struct EventStorage {
         ++iteration;
     }
 
-};  // struct EventStorage
+    EventSet from() const {
+        return EventSet(events);
+    }
+
+    EventSet select(const std::string& cond) const {
+        return from().select(cond);
+    }
+
+};  // struct Events
 
 /**
  * from
- * Forms a from(xxx).where(xxx) query.
+ * Form a from(xxx).select(xxx).where(xxx) query.
  */
 static inline EventSet from(const EventSet& events) {
     return events;
+}
+
+static inline EventSet from(const Events& events) {
+    return events.from();
 }
 
 }   // namespace mori

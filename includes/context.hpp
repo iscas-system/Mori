@@ -1,15 +1,15 @@
 #pragma once
 
-#include <string>
-#include <unordered_map>
-#include <iostream>
+#include "stdlibs.hpp"
 
 namespace mori {
 
 struct Context final {
 protected:
-    std::unordered_map<std::string, std::string> defaults;
-    std::unordered_map<std::string, std::string> contexts;
+    std::map<std::string, std::string> defaults;
+    std::map<std::string, std::string> contexts;
+
+    std::string empty_string;
 
     void prepareDefaultParams() {
         defaults.insert(std::make_pair("path", "int://local"));
@@ -49,7 +49,7 @@ public:
         contexts = move(_context.contexts);
     }
 
-    const std::string& at(const std::string& key) const {
+    std::string& at(const std::string& key) {
         auto p = contexts.find(key);
         if (p != contexts.end()) return p->second;
 
@@ -60,8 +60,34 @@ public:
 
     }
 
+    const std::string& at(const std::string& key) const {
+        auto p = contexts.find(key);
+        if (p != contexts.end()) return p->second;
+
+        p = defaults.find(key);
+        if (p != defaults.end()) return p->second;
+
+        throw std::exception();
+    }
+
+    std::string& operator[](const std::string& key) {
+        auto p = contexts.find(key);
+        if (p != contexts.end()) return p->second;
+
+        p = defaults.find(key);
+        if (p != defaults.end()) return p->second;
+
+        return contexts[key];
+    }
+
     const std::string& operator[](const std::string& key) const {
-        return at(key);
+        auto p = contexts.find(key);
+        if (p != contexts.end()) return p->second;
+
+        p = defaults.find(key);
+        if (p != defaults.end()) return p->second;
+
+        return empty_string;
     }
 
     bool isParamExists(const std::string& key) {

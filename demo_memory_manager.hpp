@@ -4,7 +4,7 @@
 #include <mutex>
 #include <cstdlib>
 
-#include "frontend/memory_manager.hpp"
+#include "libmori.hpp"
 
 struct LoggingMemoryManager : public mori::MemoryManager {
     virtual void* allocate(size_t size) {
@@ -53,7 +53,6 @@ struct DemoMemoryManager : public mori::MemoryManager{
         device_map.insert(std::make_pair(ret_address, size));
 
         total_size += size;
-        std::cout<<size<<" allocated.\n";
         return ret_address;
     }
 
@@ -73,7 +72,6 @@ struct DemoMemoryManager : public mori::MemoryManager{
         device_map.insert(std::make_pair(device_address, size));
         total_size += size;
 
-        std::cout<<size<<" copied in.\n";
         return device_address;
     }
 
@@ -92,7 +90,6 @@ struct DemoMemoryManager : public mori::MemoryManager{
         std::memcpy(host_address, address, size);
         host_map.insert(std::make_pair(host_address, size));
 
-        std::cout<<size<<" copied out.\n";
         return host_address;
     }
 
@@ -107,8 +104,6 @@ struct DemoMemoryManager : public mori::MemoryManager{
         std::free(p->first);
         total_size -= p->second;
         device_map.erase(p);
-
-        std::cout<<address<<" freed on device.\n";
     }
 
     virtual void freeHost(void* address) {
@@ -121,8 +116,6 @@ struct DemoMemoryManager : public mori::MemoryManager{
 
         std::free(p->first);
         host_map.erase(p);
-
-        std::cout<<address<<" freed on host.\n";
     }
 
     ~DemoMemoryManager() {
