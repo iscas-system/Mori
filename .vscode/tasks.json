@@ -6,6 +6,9 @@
 			"label": "C/C++: clang++ 生成活动文件",
 			"command": "/usr/bin/clang++",
 			"args": [
+				"-I",
+				".",
+				"-DENABLE_INTEGRATED_BACKEND",
 				"-std=c++17",
 				"-fdiagnostics-color=always",
 				"-g",

@@ -1,4 +1,6 @@
-*.out
+libmori.so
+libmori.hpp
+
 *.dSYM
-*.so
+
 main

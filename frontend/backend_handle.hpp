@@ -1,12 +1,13 @@
 #pragma once
 
-#include "../includes/stdlibs.hpp"
+#include "includes/stdlibs.hpp"
 
-#include "../includes/backend.hpp"
-#include "../includes/context.hpp"
-#include "../includes/logging.hpp"
-#include "../includes/memory_status.hpp"
-#include "../includes/memory_event.hpp"
+#include "includes/backend.hpp"
+#include "includes/context.hpp"
+#include "includes/logging.hpp"
+#include "includes/memory_status.hpp"
+#include "includes/memory_event.hpp"
+#include "includes/exceptions.hpp"
 
 namespace mori {
 
@@ -21,7 +22,7 @@ struct BackendHandle {
     BackendHandle(BackendHandle&& backend_handle) = default;
 
     void setLogger(Logger* _logger) {
-        if (inited) throw std::exception();
+        if (inited) throw inited_exception();
         logger = _logger;
     }
 
@@ -77,7 +78,7 @@ struct LocalBackendHandle : public BackendHandle {
     }
 
     virtual void terminate() {
-        if (!inited) throw std::exception();
+        if (!inited) throw uninited_exception();
 
         backend->terminate();
 
@@ -94,7 +95,7 @@ struct LocalBackendHandle : public BackendHandle {
 struct IntegratedBackendHandle : public LocalBackendHandle {
     IntegratedBackendHandle(const Context& _context): LocalBackendHandle(_context) {
         int ret = backend_entry(backend, _context);
-		if (ret != 0) throw std::exception();
+		if (ret != 0) throw backend_exception();
     }
 };  // struct IntegratedBackendHandle
 #endif
@@ -113,14 +114,14 @@ struct DylibBackendHandle : public LocalBackendHandle {
         std::string obj_path = std::string(path.begin() + 8, path.end()).c_str();
 
 		hInst = dlopen(obj_path.c_str(), RTLD_LAZY);
-		if (!hInst) throw std::exception();
+		if (!hInst) throw dynamic_library_exception("Failed to open backend dynamic library.");
 		BackendEntryType backend_entry = (BackendEntryType)dlsym(hInst, "backend_entry");
 
 		int ret;
 		if (backend_entry) ret = backend_entry(backend, _context);
-		else throw std::exception();
+		else throw dynamic_library_exception("Failed to access backend entry.");
 
-		if (ret != 0) throw std::exception();
+		if (ret != 0) throw dynamic_library_exception("Failed to enter backend.");
     }
 
     virtual ~DylibBackendHandle() {
@@ -150,15 +151,17 @@ struct DylibBackendHandle : public LocalBackendHandle {
 //     ~HTTPBackendHandle() {}
 // };  // struct HTTPBackendHandle
 
-static std::unique_ptr<BackendHandle> make_backend_handle(const Context& _context) {
-    const std::string& path= _context["path"];
+static std::unique_ptr<BackendHandle> make_backend_handle(const Context& context) {
+    // if (!context.isParamExists("path")) throw context_missing();
+
+    const std::string& path= context["path"];
 #ifdef ENABLE_INTEGRATED_BACKEND
-    if (path.find("int://") == 0) return std::unique_ptr<BackendHandle>(new IntegratedBackendHandle(_context));
+    if (path.find("int://") == 0) return std::unique_ptr<BackendHandle>(new IntegratedBackendHandle(context));
 #endif
-    if (path.find("dylib://") == 0) return std::unique_ptr<BackendHandle>(new DylibBackendHandle(_context));
+    if (path.find("dylib://") == 0) return std::unique_ptr<BackendHandle>(new DylibBackendHandle(context));
     //else if (path.find("http://") == path.begin()) return std::unique_ptr<BackendHandle>(new RemoteBackendHandle(_context));
     //else if (path.find("https://") == path.begin()) return std::unique_ptr<BackendHandle>(new RemoteBackendHandle(_context));
-    else throw std::exception();
+    else throw context_invalid("path");
 }
 
 }   // namespace mori

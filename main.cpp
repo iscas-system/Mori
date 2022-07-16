@@ -5,7 +5,7 @@
 #include <cassert>
 #include <thread>
 
-#include "libmori.hpp"
+#include "frontend/libmori.hpp"
 #include "demo_memory_manager.hpp"
 
 int main(int argc, char** argv) {
@@ -13,7 +13,7 @@ int main(int argc, char** argv) {
     DemoMemoryManager mem_manager;
     mori::StdIOLogger logger;
 
-    context["path"] = "dylib://libmori.so";
+    //context["path"] = "dylib://libmori.so";
 
     mori::Frontend frontend(context);
     frontend.setMemoryManager(&mem_manager);

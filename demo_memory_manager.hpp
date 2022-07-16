@@ -4,7 +4,7 @@
 #include <mutex>
 #include <cstdlib>
 
-#include "libmori.hpp"
+#include "frontend/libmori.hpp"
 
 struct LoggingMemoryManager : public mori::MemoryManager {
     virtual void* allocate(size_t size) {

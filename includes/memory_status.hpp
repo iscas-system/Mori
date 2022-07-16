@@ -1,6 +1,7 @@
 #pragma once
 
-#include "stdlibs.hpp"
+#include "includes/stdlibs.hpp"
+#include "includes/exceptions.hpp"
 
 namespace mori {
 
@@ -18,21 +19,21 @@ enum MemoryDataStatusType {
  */
 struct TensorStatus {
     // These four variables can be regarded as const variables.
-    std::string name;
-    void* host_address;
-    void* device_address;
-    size_t size;
-    MemoryType type;
+    std::string name = "";
+    void* host_address = nullptr;
+    void* device_address = nullptr;
+    size_t size = 0;
+    MemoryType type = all;
 
-    MemoryDataStatusType data_status;
+    MemoryDataStatusType data_status = none;
 
     // If the tensor status is locked. Only the mutex holder can modify the status.
     // Specifically, update memory data status.
     std::shared_mutex status_mutex;
 
-    TensorStatus(): name(""), size(0), type(MemoryType::all), host_address(nullptr), device_address(nullptr), data_status(MemoryDataStatusType::none) {}
+    TensorStatus(): name(""), host_address(nullptr), device_address(nullptr), size(0), type(MemoryType::all), data_status(MemoryDataStatusType::none) {}
 
-    TensorStatus(const std::string& _name, size_t _size, MemoryType _type): name(_name), size(_size), type(_type), host_address(nullptr), device_address(nullptr), data_status(MemoryDataStatusType::none) {}
+    TensorStatus(const std::string& _name, size_t _size, MemoryType _type): name(_name), host_address(nullptr), device_address(nullptr), size(_size), type(_type), data_status(MemoryDataStatusType::none) {}
 
     TensorStatus(const TensorStatus& status) {
         name = status.name;
@@ -79,7 +80,7 @@ struct OperatorStatus {
     using const_iterator = std::unordered_map<std::string, TensorStatus>::const_iterator;
 
     // These three variables be regarded as const variables.
-    std::string name;
+    std::string name = "";
     // The prev and post operators in the graph.
     std::vector<std::string> prevs, posts;
 
@@ -174,7 +175,7 @@ struct MemoryStatuses {
     void registerOperator(const OperatorStatus& opstatus) {
         std::unique_lock<std::shared_mutex>{status_mutex};
         auto p = status.find(opstatus.name);
-        if (p != status.end()) throw std::exception();
+        if (p != status.end()) throw status_error("Operator already registered.");
 
         exec_order.push_back(opstatus.name);
 
@@ -223,7 +224,7 @@ struct MemoryStatuses {
         // Shared lock operator status mutex, since no object insert / erase takes place.
         std::shared_lock<std::shared_mutex>{status_mutex};
         auto p = status.find(op);
-        if (p != status.end()) return false;
+        if (p == status.end()) return false;
 
         return p->second.isTensorRegistered(tensor);
     }
@@ -243,7 +244,7 @@ struct MemoryStatuses {
     void unregisterOperator(const std::string& op) {
         std::unique_lock<std::shared_mutex>{status_mutex};
         auto p = status.find(op);
-        if (p == status.end()) throw std::exception();
+        if (p == status.end()) throw status_error("Operator not registered.");
 
         status.erase(p);
     }

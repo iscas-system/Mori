@@ -11,13 +11,13 @@
 
 #include <dlfcn.h>
 
-#include "memory_scheduler.hpp"
-#include "events.hpp"
-#include "memory_scheduler.hpp"
-#include "../includes/memory_status.hpp"
-#include "../includes/backend.hpp"
-#include "../includes/context.hpp"
-#include "../includes/memory_event.hpp"
+#include "backend/memory_scheduler.hpp"
+#include "backend/events.hpp"
+#include "includes/memory_status.hpp"
+#include "includes/backend.hpp"
+#include "includes/context.hpp"
+#include "includes/memory_event.hpp"
+#include "includes/exceptions.hpp"
 
 namespace mori {
 
@@ -61,14 +61,14 @@ struct BasicBackend final : public Backend {
             typedef int(*SchedulerEntryType)(std::unique_ptr<MemoryScheduler>&);
 
             hInst = dlopen(scheduler_path.c_str(), RTLD_LAZY);
-            if (!hInst) throw std::exception();
+            if (!hInst) throw dynamic_library_exception("Failed to open scheduler dynamic library.");
             SchedulerEntryType scheduler_entry = (SchedulerEntryType)dlsym(hInst, "scheduler_entry");
 
             int ret;
             if (scheduler_entry) ret = scheduler_entry(scheduler);
-            else throw std::exception();
+            else throw dynamic_library_exception("Failed to access scheduler entry.");
 
-            if (ret != 0) throw std::exception();
+            if (ret != 0) throw dynamic_library_exception("Failed to enter scheduler.");
         }
        
     }
@@ -96,15 +96,15 @@ struct BasicBackend final : public Backend {
     }
 
     virtual void registerOperator(const OperatorStatus& operator_status) {
-        if (!inited) throw std::exception();
+        if (!inited) throw uninited_exception();
 
-        if (memory_status.isOperatorRegistered(operator_status.name)) throw std::exception();
+        if (memory_status.isOperatorRegistered(operator_status.name)) throw status_error("Operator already registered.");
 
         memory_status.registerOperator(operator_status);
     }
 
     virtual void submitEvent(const MemoryEvent& event) {
-        if (!inited) throw std::exception();
+        if (!inited) throw uninited_exception();
 
         events.submitEvent(event);
         scheduler->submitEvent(event);
@@ -137,9 +137,9 @@ struct BasicBackend final : public Backend {
     }
 
     virtual void unregisterOperator(const std::string& op) {
-        if (!inited) throw std::exception();
+        if (!inited) throw uninited_exception();
 
-        if (!memory_status.isOperatorRegistered(op)) throw std::exception();
+        if (!memory_status.isOperatorRegistered(op)) throw status_error("Operator not registered");
 
         memory_status.unregisterOperator(op);
     }

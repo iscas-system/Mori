@@ -6,9 +6,10 @@
 #include <iostream>
 #include <condition_variable>
 
-#include "../includes/backend.hpp"
-#include "../includes/memory_event.hpp"
-#include "../includes/memory_schedule_event.hpp"
+#include "includes/backend.hpp"
+#include "includes/memory_event.hpp"
+#include "includes/memory_schedule_event.hpp"
+#include "includes/exceptions.hpp"
 
 namespace mori {
 
@@ -25,7 +26,7 @@ struct MemoryScheduler {
     }
 
     virtual void init() {
-        if (inited) throw std::exception();
+        if (inited) throw inited_exception();
         inited = true;
     }
 
@@ -71,17 +72,17 @@ struct MemoryScheduler {
     }
 
     virtual void submitEvent(MemoryEvent event) {
-        if (!inited) throw std::exception();
+        if (!inited) throw uninited_exception();
         onMemoryEvent(event);
     }
 
     virtual void increaseIteration() {
-        if (!inited) throw std::exception();
+        if (!inited) throw uninited_exception();
         onIncreaseIteration();
     }
 
     virtual void terminate() {
-        if (!inited) throw std::exception();
+        if (!inited) throw uninited_exception();
         inited = false;
     }
 

@@ -2,23 +2,23 @@
 
 default: all
 
-CC = g++
+CC = clang++
 
 header:
-	@$(CC) -DSINGLE_HEADER_LIBRARY $(CFLAGS) -E frontend/libmori.hpp | grep -v "# " > libmori.hpp_definations
-	@cat includes/stdlibs.hpp | grep -v "#define SINGLE_HEADER_LIBRARY" > libmori.hpp_includes
+	@$(CC) -I . -DSINGLE_HEADER_LIBRARY $(CFLAGS) -E frontend/libmori.hpp | grep -v "# " > libmori.hpp_definations
+	@cat includes/stdlibs.hpp | grep -v "#define SINGLE_HEADER_LIBRARY" | grep -v "#ifndef SINGLE_HEADER_LIBRARY" | grep -v "#endif" > libmori.hpp_includes
 	@cat libmori.hpp_definations >> libmori.hpp_includes
 	@mv libmori.hpp_includes libmori.hpp
 	@rm -rf libmori.hpp_definations
 
 library:
-	@$(CC) -std=c++17 -shared -fPIC -o libmori.so backend/basic_backend.cpp
+	@$(CC) -I . -std=c++17 -shared -fPIC -o libmori.so backend/basic_backend.cpp
 
 all: header library
-	@$(CC) -std=c++17 main.cpp -L. -lmori
+	@$(CC) -I . -std=c++17 main.cpp -L. -lmori -o main
 
 clean:
-	@rm -rf libmori.so libmori.hpp a.out
+	@rm -rf libmori.so libmori.hpp main
 
 usage:
 	@echo "Usages:"

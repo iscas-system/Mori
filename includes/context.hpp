@@ -1,6 +1,7 @@
 #pragma once
 
-#include "stdlibs.hpp"
+#include "includes/stdlibs.hpp"
+#include "includes/exceptions.hpp"
 
 namespace mori {
 
@@ -56,7 +57,7 @@ public:
         p = defaults.find(key);
         if (p != defaults.end()) return p->second;
 
-        throw std::exception();
+        throw context_missing(key);
 
     }
 
@@ -67,7 +68,7 @@ public:
         p = defaults.find(key);
         if (p != defaults.end()) return p->second;
 
-        throw std::exception();
+        throw context_missing(key);
     }
 
     std::string& operator[](const std::string& key) {

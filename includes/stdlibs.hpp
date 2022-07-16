@@ -2,30 +2,26 @@
 
 #ifndef SINGLE_HEADER_LIBRARY
 
+#include <iostream>
+#include <iomanip>
 #include <string>
-#include <memory>
-#include <exception>
-#include <utility>
-
+#include <sstream>
 #include <vector>
+#include <map>
+#include <unordered_set>
+#include <unordered_map>
 #include <algorithm>
+#include <exception>
 #include <thread>
 #include <atomic>
 #include <mutex>
 #include <shared_mutex>
+#include <utility>
+#include <memory>
+#include <functional>
 #include <chrono>
 #include <cassert>
-#include <iostream>
-#include <unordered_set>
-
-#include <map>
-
-#include <functional>
-#include <sstream>
-#include <iomanip>
 #include <ctime>
-
-#include <unordered_map>
 
 #include <dlfcn.h>
 

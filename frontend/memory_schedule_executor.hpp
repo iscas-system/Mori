@@ -1,12 +1,13 @@
 #pragma once
 
-#include "../includes/stdlibs.hpp"
+#include "includes/stdlibs.hpp"
 
-#include "memory_manager.hpp"
-#include "../includes/context.hpp"
-#include "../includes/memory_status.hpp"
-#include "../includes/memory_schedule_event.hpp"
-#include "../includes/logging.hpp"
+#include "frontend/memory_manager.hpp"
+#include "includes/context.hpp"
+#include "includes/memory_status.hpp"
+#include "includes/memory_schedule_event.hpp"
+#include "includes/logging.hpp"
+#include "includes/exceptions.hpp"
 
 namespace mori {
 
@@ -58,7 +59,7 @@ protected:
         switch (status.data_status) {
             case MemoryDataStatusType::none:
             case MemoryDataStatusType::empty:
-                throw std::exception();
+                throw status_error("Copying in non-exist or empty data.");
             case MemoryDataStatusType::device:
                 break;
             case MemoryDataStatusType::host:
@@ -82,7 +83,7 @@ protected:
         switch (status.data_status) {
             case MemoryDataStatusType::none:
             case MemoryDataStatusType::empty:
-                throw std::exception();
+                throw status_error("Copying out non-exist or empty data.");
             case MemoryDataStatusType::device:
                 status.host_address = memory_manager->copyOut(status.device_address, status.size);
                 status.data_status = MemoryDataStatusType::coexist;
@@ -239,25 +240,25 @@ public:
     MemoryScheduleExecutor(MemoryScheduleExecutor&& executor) = delete;
 
     void setMemoryManager(MemoryManager* _memory_manager) {
-        if (inited) throw std::exception();
+        if (inited) throw inited_exception();
         memory_manager = _memory_manager;
     }
 
     void setMemoryStatuses(MemoryStatuses* _memory_status) {
-        if (inited) throw std::exception();
+        if (inited) throw inited_exception();
         memory_status = _memory_status;
     }
 
     void setLogger(Logger* _logger) {
-        if (inited) throw std::exception();
+        if (inited) throw inited_exception();
         logger = _logger;
     }
 
     virtual void init() {
-        if (inited) throw std::exception();
+        if (inited) throw inited_exception();
 
-        if (memory_manager == nullptr) throw std::exception();
-        if (memory_status == nullptr) throw std::exception();
+        if (memory_manager == nullptr) throw status_error("Memory manager not assigned.");
+        if (memory_status == nullptr) throw status_error("Memory status storage not assigned.");
 
         resetExecutionInterval();
 
@@ -329,22 +330,22 @@ public:
     }
 
     void nextIteration() {
-        if (!inited) throw std::exception();
+        if (!inited) throw uninited_exception();
         onNextIteration();
     }
 
     void nextOperator() {
-        if (!inited) throw std::exception();
+        if (!inited) throw uninited_exception();
         onNextOperator();
     }
 
     void waitMemory(size_t size) {
-        if (!inited) throw std::exception();
+        if (!inited) throw uninited_exception();
         onMemoryInsufficient(size);
     }
 
     void terminate() {
-        if (!inited) throw std::exception();
+        if (!inited) throw uninited_exception();
 
         inited = false;
 
@@ -409,7 +410,7 @@ static std::shared_ptr<MemoryScheduleExecutor> make_executor(const Context& _con
     const std::string& type = _context["scheduler.trigger_event"];
     if (type == "time") return std::shared_ptr<MemoryScheduleExecutor>(new TimebasedMemoryScheduleExecutor(_context));
     else if (type == "dependency") return std::shared_ptr<MemoryScheduleExecutor>(new DependencyMemoryScheduleExecutor(_context));
-    else throw std::exception();
+    else throw context_invalid("scheduler.trigger_event");
 }
 
 }   // namespace mori

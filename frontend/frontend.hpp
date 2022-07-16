@@ -1,14 +1,15 @@
 #pragma once
 
-#include "../includes/stdlibs.hpp"
+#include "includes/stdlibs.hpp"
 
-#include "memory_session.hpp"
-#include "memory_schedule_executor.hpp"
-#include "memory_manager.hpp"
+#include "frontend/memory_session.hpp"
+#include "frontend/memory_schedule_executor.hpp"
+#include "frontend/memory_manager.hpp"
 #include "backend_handle.hpp"
-#include "../includes/context.hpp"
-#include "../includes/memory_status.hpp"
-#include "../includes/logging.hpp"
+#include "includes/context.hpp"
+#include "includes/memory_status.hpp"
+#include "includes/logging.hpp"
+#include "includes/exceptions.hpp"
 
 namespace mori {
 
@@ -60,14 +61,14 @@ public:
      * 
      */
     void setMemoryManager(MemoryManager* _mem_manager) {
-        if (inited) throw std::exception();
+        if (inited) throw inited_exception();
         mem_manager = _mem_manager;
         executor->setMemoryManager(_mem_manager);
         session.setMemoryManager(_mem_manager);
     }
 
     void setLogger(Logger* _logger) {
-        if (inited) throw std::exception();
+        if (inited) throw inited_exception();
         if (_logger == nullptr) logger = &empty_logger;
         logger = _logger;
 
@@ -77,12 +78,12 @@ public:
     }
 
     void init() {
-        if (inited) throw std::exception();
+        if (inited) throw inited_exception();
 
         // Forward callpath initialization failed.
-        if (backend_handle == nullptr) throw std::exception();
+        if (backend_handle == nullptr) throw status_error("Backend not inited.");
         // Backward callpath initialization failed.
-        if (mem_manager == nullptr) throw std::exception();
+        if (mem_manager == nullptr) throw status_error("Memory manager not assigned.");
         
         backend_handle->init();
 
@@ -102,7 +103,7 @@ public:
         if (!inited) {
             (*logger)<<LogLevel::error<<"Registering operator "<<operator_status.name<<" while frontend not initialized.";
             logger->flush();
-            throw std::exception();
+            throw uninited_exception();
         }
 
         memory_status.registerOperator(operator_status);
@@ -117,13 +118,13 @@ public:
         if (!inited) {
             (*logger)<<LogLevel::error<<"Referencing to session from uninitialized frontend.";
             logger->flush();
-            throw std::exception();
+            throw uninited_exception();
         }
         return session;
     }
 
     void updateSchedule() {
-        if (!inited) throw std::exception();
+        if (!inited) throw uninited_exception();
         auto&& event_set = backend_handle->getScheduleEvents();
         executor->updateSchedule(event_set);
     }
@@ -134,14 +135,14 @@ public:
      * @param op name of the operator to be unregistered.
      */
     void unregisterOperator(const std::string& op) {
-        if (!inited) throw std::exception();
+        if (!inited) throw uninited_exception();
 
         memory_status.unregisterOperator(op);
         backend_handle->unregisterOperator(op);
     }
 
     void terminate() {
-        if (!inited) throw std::exception();
+        if (!inited) throw uninited_exception();
 
         backend_handle -> terminate();
         

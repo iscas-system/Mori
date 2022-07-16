@@ -6,7 +6,7 @@
 #include <map>
 #include <utility>
 
-#include "../includes/memory_event.hpp"
+#include "includes/memory_event.hpp"
 
 namespace mori {
 
