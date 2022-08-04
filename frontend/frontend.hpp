@@ -39,17 +39,14 @@ protected:
 public:
     Frontend(const Context& _context): 
         context(_context), 
-        session(_context) {
+        session(_context, memory_status) {
         // Set backend
         backend_handle = make_backend_handle(_context);
 
         // Set executor
-        executor = make_executor(context);
-
-        executor->setMemoryStatuses(&memory_status);
+        executor = make_executor(context, memory_status);
 
         session.setBackendHandle(std::weak_ptr<BackendHandle>(backend_handle));
-        session.setMemoryStatusStorage(&memory_status);
         session.setExecutor(executor);
 
         logger = &empty_logger;
@@ -89,7 +86,7 @@ public:
 
         inited = true;
 
-        logger->submit(LogLevel::debug, "Mori frontend inited.");
+        logger->submit(LogLevel::info, "Mori frontend inited.");
     }
 
     bool isInited() {return inited;}
@@ -109,9 +106,22 @@ public:
         memory_status.registerOperator(operator_status);
         backend_handle->registerOperator(operator_status);
 
-        (*logger)<<LogLevel::info<<"Operator "<<operator_status.name<<" registered.";
+        (*logger)<<LogLevel::debug<<"Operator "<<operator_status.name<<" registered.";
         logger->flush();
-        
+    }
+
+    void updateOperator(const std::string& op, const TensorStatus& tensor_status) {
+        if (!inited) {
+            (*logger)<<LogLevel::error<<"Updating operator "<<op<<" while frontend not initialized.";
+            logger->flush();
+            throw uninited_exception();
+        }
+
+        memory_status.updateOperator(op, tensor_status);
+        // backend_handle->updateOperator(op, tensor_status);
+
+        (*logger)<<LogLevel::debug<<"Operator "<<op<<" updated.";
+        logger->flush();
     }
 
     MemorySession& getSession() {
@@ -127,6 +137,9 @@ public:
         if (!inited) throw uninited_exception();
         auto&& event_set = backend_handle->getScheduleEvents();
         executor->updateSchedule(event_set);
+
+        (*logger)<<LogLevel::debug<<"Schedule updated.";
+        logger->flush();
     }
 
     /**
@@ -139,18 +152,29 @@ public:
 
         memory_status.unregisterOperator(op);
         backend_handle->unregisterOperator(op);
+
+        (*logger)<<LogLevel::debug<<"Operator "<<op<<" unregistered.";
+        logger->flush();
     }
 
     void terminate() {
         if (!inited) throw uninited_exception();
 
+        if (session.isInited()) session.terminate();
         backend_handle -> terminate();
+
+        memory_status.clear();
+
+        inited = false;
+        logger->submit(LogLevel::info, "Mori frontend terminated.");
+    }
+
+    ~Frontend() {
+        if (inited) terminate();
         
         backend_handle.reset();
         mem_manager = nullptr;
         logger = nullptr;
-
-        inited = false;
     }
 
 };

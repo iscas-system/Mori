@@ -10,12 +10,16 @@ protected:
     std::map<std::string, std::string> defaults;
     std::map<std::string, std::string> contexts;
 
-    std::string empty_string;
-
     void prepareDefaultParams() {
         defaults.insert(std::make_pair("path", "int://local"));
         defaults.insert(std::make_pair("scheduler", "fifo"));
         defaults.insert(std::make_pair("scheduler.trigger_event", "dependency"));
+
+        // Operator parameters
+        //  external_inputs: Operator leverages external input tensors (e.g., memory reuse)
+        // defaults.insert(std::make_pair("operators.external_inputs", "1"));
+        // defaults.insert(std::make_pair("operators.external_weights", "1"));
+        // defaults.insert(std::make_pair("operators.external_constants", "1"));
     }
 
 public:
@@ -81,17 +85,11 @@ public:
         return contexts[key];
     }
 
-    const std::string& operator[](const std::string& key) const {
-        auto p = contexts.find(key);
-        if (p != contexts.end()) return p->second;
-
-        p = defaults.find(key);
-        if (p != defaults.end()) return p->second;
-
-        return empty_string;
+    bool signal(const std::string& key) const {
+        return at(key) == "1" ? true : false;
     }
 
-    bool isParamExists(const std::string& key) {
+    bool isParamExists(const std::string& key) const {
         auto p = contexts.find(key);
         if (p != contexts.end()) return true;
 
@@ -101,7 +99,7 @@ public:
         return false;
     }
 
-    bool isDefaultParam(const std::string& key) {
+    bool isDefaultParam(const std::string& key) const {
         auto p = contexts.find(key);
         if (p != contexts.end()) return false;
 

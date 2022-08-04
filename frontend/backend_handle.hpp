@@ -37,12 +37,14 @@ struct BackendHandle {
     virtual void unregisterOperator(const std::string& op) = 0;
 
     virtual void terminate() {
-        logger = nullptr;
+        if (!inited) throw uninited_exception();
 
         inited = false;
     }
 
-    virtual ~BackendHandle() = default;
+    virtual ~BackendHandle() {
+        logger = nullptr;
+    }
 };  // struct BackendHandle  
 
 struct LocalBackendHandle : public BackendHandle {
@@ -85,7 +87,9 @@ struct LocalBackendHandle : public BackendHandle {
         BackendHandle::terminate();
     }
 
-    virtual ~LocalBackendHandle() = default;
+    virtual ~LocalBackendHandle() {
+        backend.reset();
+    }
 };  // struct LocalBackendHandle
 
 #ifdef ENABLE_INTEGRATED_BACKEND
@@ -110,7 +114,7 @@ struct DylibBackendHandle : public LocalBackendHandle {
     DylibBackendHandle(const Context& _context): LocalBackendHandle(_context) {
         typedef int(*BackendEntryType)(std::unique_ptr<Backend>&, const Context&);
 
-        const std::string& path = _context["path"];
+        const std::string& path = _context.at("path");
         std::string obj_path = std::string(path.begin() + 8, path.end()).c_str();
 
 		hInst = dlopen(obj_path.c_str(), RTLD_LAZY);
@@ -154,7 +158,7 @@ struct DylibBackendHandle : public LocalBackendHandle {
 static std::unique_ptr<BackendHandle> make_backend_handle(const Context& context) {
     // if (!context.isParamExists("path")) throw context_missing();
 
-    const std::string& path= context["path"];
+    const std::string& path = context.at("path");
 #ifdef ENABLE_INTEGRATED_BACKEND
     if (path.find("int://") == 0) return std::unique_ptr<BackendHandle>(new IntegratedBackendHandle(context));
 #endif

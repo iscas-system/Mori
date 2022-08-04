@@ -20,7 +20,7 @@ protected:
     std::atomic<bool> events_flag;
 
     std::thread executor_thread;
-    std::mutex executor_mutex;
+    std::recursive_mutex executor_mutex;
 
     std::vector<ScheduleEvent>::iterator current_event_posi;
     std::atomic<bool> iter_flag;
@@ -28,12 +28,12 @@ protected:
     std::atomic<bool> inited = false;
     
     MemoryManager* memory_manager = nullptr;
-    MemoryStatuses* memory_status = nullptr;
+    MemoryStatuses& memory_status;
     
     Logger* logger = nullptr;
 
     void doAllocateMemory(const std::string& operator_name, const std::string& tensor_name) {
-        TensorStatus& status = (*memory_status)[operator_name][tensor_name];
+        TensorStatus& status = memory_status[operator_name][tensor_name];
         std::unique_lock<std::shared_mutex> lock(status.status_mutex);
         switch (status.data_status) {
             case MemoryDataStatusType::none:
@@ -54,7 +54,7 @@ protected:
     }
 
     void doCopyInMemory(const std::string& operator_name, const std::string& tensor_name) {
-        TensorStatus& status = (*memory_status)[operator_name][tensor_name];
+        TensorStatus& status = memory_status[operator_name][tensor_name];
         std::unique_lock<std::shared_mutex> lock(status.status_mutex);
         switch (status.data_status) {
             case MemoryDataStatusType::none:
@@ -78,7 +78,7 @@ protected:
     }
 
     void doCopyOutMemory(const std::string& operator_name, const std::string& tensor_name) {
-        TensorStatus& status = (*memory_status)[operator_name][tensor_name];
+        TensorStatus& status = memory_status[operator_name][tensor_name];
         std::unique_lock<std::shared_mutex> lock(status.status_mutex);
         switch (status.data_status) {
             case MemoryDataStatusType::none:
@@ -101,7 +101,7 @@ protected:
     }
 
     void doFreeDeviceMemory(const std::string& operator_name, const std::string& tensor_name) {
-        TensorStatus& status = (*memory_status)[operator_name][tensor_name];
+        TensorStatus& status = memory_status[operator_name][tensor_name];
         std::unique_lock<std::shared_mutex> lock(status.status_mutex);
         switch (status.data_status) {
             case MemoryDataStatusType::none:
@@ -127,7 +127,7 @@ protected:
     }
 
     void doFreeHostMemory(const std::string& operator_name, const std::string& tensor_name) {
-        TensorStatus& status = (*memory_status)[operator_name][tensor_name];
+        TensorStatus& status = memory_status[operator_name][tensor_name];
         std::unique_lock<std::shared_mutex> lock(status.status_mutex);
         switch (status.data_status) {
             case MemoryDataStatusType::none:
@@ -163,7 +163,7 @@ protected:
     }
 
     void doFreeMemory(const std::string& operator_name, const std::string& tensor_name) {
-        TensorStatus& status = (*memory_status)[operator_name][tensor_name];
+        TensorStatus& status = memory_status[operator_name][tensor_name];
         switch (status.data_status) {
             case MemoryDataStatusType::none:
                 break;
@@ -210,31 +210,31 @@ protected:
      * Here a LRU algorithm is leveraged.
      */
     virtual void onMemoryInsufficient(size_t size) {
-        logger->submit(LogLevel::debug, "Memory insufficient.");
-        for (auto &op : memory_status->exec_order) {
-            bool hosted = true;
-            for (auto &tensor_status : memory_status->at(op)) {
-                if (tensor_status.second.data_status == MemoryDataStatusType::host) continue;
-                hosted = false;
-            }
+        (*logger) << LogLevel::debug << "Memory insufficient.";
+        logger->flush();
 
-            if (hosted) continue;
+        size_t cur_swapped_size = 0;
+        for (auto &op : memory_status.exec_order) {
+            for (auto &tensor_status : memory_status.at(op)) {
+                switch (tensor_status.second.data_status) {
+                case device:
+                case coexist:
+                    doSwapOutMemory(op, tensor_status.first);
+                    (*logger)<<LogLevel::debug<<"Operator "<<op<<": tensor "<<tensor_status.first<<" swapped out. (On demand)";
+                    logger->flush();
+                    cur_swapped_size += tensor_status.second.size;
+                default:
+                    break;
+                }
 
-            // Swap out this operator
-            for (auto &tensor_status : memory_status->at(op)) {
-                doSwapOutMemory(op, tensor_status.first);
-                (*logger)<<LogLevel::debug<<"Operator "<<op<<": tensor "<<tensor_status.first<<" swapped out. (On demand)";
-                logger->flush();
+                if (cur_swapped_size >= size) return;
             }
             
-            return;
         }
     }
 
 public:
-    MemoryScheduleExecutor(Context _context) {
-        context = _context;
-    }
+    MemoryScheduleExecutor(Context _context, MemoryStatuses& _memory_status): context(_context), memory_status(_memory_status) {}
 
     MemoryScheduleExecutor(const MemoryScheduleExecutor&) = delete;
     MemoryScheduleExecutor(MemoryScheduleExecutor&& executor) = delete;
@@ -242,11 +242,6 @@ public:
     void setMemoryManager(MemoryManager* _memory_manager) {
         if (inited) throw inited_exception();
         memory_manager = _memory_manager;
-    }
-
-    void setMemoryStatuses(MemoryStatuses* _memory_status) {
-        if (inited) throw inited_exception();
-        memory_status = _memory_status;
     }
 
     void setLogger(Logger* _logger) {
@@ -258,7 +253,6 @@ public:
         if (inited) throw inited_exception();
 
         if (memory_manager == nullptr) throw status_error("Memory manager not assigned.");
-        if (memory_status == nullptr) throw status_error("Memory status storage not assigned.");
 
         resetExecutionInterval();
 
@@ -351,12 +345,14 @@ public:
 
         // Examine if the thread terminates properly
         if (executor_thread.joinable()) executor_thread.join();
-        memory_manager = nullptr;
-        logger = nullptr;
+
     }
 
     virtual ~MemoryScheduleExecutor() {
         if (inited) terminate();
+
+        memory_manager = nullptr;
+        logger = nullptr;
     }
 
 };  // struct MemoryScheduleExecutor
@@ -366,7 +362,7 @@ protected:
     std::chrono::steady_clock::time_point current_time_offset;
 
 public:
-    TimebasedMemoryScheduleExecutor(const Context& _context): MemoryScheduleExecutor(_context) {}
+    TimebasedMemoryScheduleExecutor(const Context& _context, MemoryStatuses& _memory_status): MemoryScheduleExecutor(_context, _memory_status) {}
     TimebasedMemoryScheduleExecutor(const TimebasedMemoryScheduleExecutor&) = delete;
 
     virtual int getExecutionInterval() {
@@ -378,7 +374,7 @@ public:
         current_event_posi = eventset.begin();
     }
 
-    virtual ~TimebasedMemoryScheduleExecutor() {}
+    virtual ~TimebasedMemoryScheduleExecutor() = default;
 
 };  // struct TimebasedMemoryScheduleExecutor
 
@@ -387,7 +383,7 @@ protected:
     int current_offset;
 
 public:
-    DependencyMemoryScheduleExecutor(const Context& _context): MemoryScheduleExecutor(_context) {}
+    DependencyMemoryScheduleExecutor(const Context& _context, MemoryStatuses& _memory_status): MemoryScheduleExecutor(_context, _memory_status) {}
     DependencyMemoryScheduleExecutor(const DependencyMemoryScheduleExecutor&) = delete;
 
     virtual int getExecutionInterval() {
@@ -403,13 +399,13 @@ public:
         current_event_posi = eventset.begin();
     }
 
-    virtual ~DependencyMemoryScheduleExecutor() {}
+    virtual ~DependencyMemoryScheduleExecutor() = default;
 };  // struct DependencyMemoryScheduleExecutor
 
-static std::shared_ptr<MemoryScheduleExecutor> make_executor(const Context& _context) {
-    const std::string& type = _context["scheduler.trigger_event"];
-    if (type == "time") return std::shared_ptr<MemoryScheduleExecutor>(new TimebasedMemoryScheduleExecutor(_context));
-    else if (type == "dependency") return std::shared_ptr<MemoryScheduleExecutor>(new DependencyMemoryScheduleExecutor(_context));
+static std::shared_ptr<MemoryScheduleExecutor> make_executor(const Context& _context, MemoryStatuses& _memory_status) {
+    const std::string& type = _context.at("scheduler.trigger_event");
+    if (type == "time") return std::shared_ptr<MemoryScheduleExecutor>(new TimebasedMemoryScheduleExecutor(_context, _memory_status));
+    else if (type == "dependency") return std::shared_ptr<MemoryScheduleExecutor>(new DependencyMemoryScheduleExecutor(_context, _memory_status));
     else throw context_invalid("scheduler.trigger_event");
 }
 

@@ -18,7 +18,7 @@ all: header library
 	@$(CC) -I . -std=c++17 main.cpp -L. -lmori -o main
 
 clean:
-	@rm -rf libmori.so libmori.hpp main
+	@rm -rf libmori.so libmori.hpp main main.dSYM
 
 usage:
 	@echo "Usages:"

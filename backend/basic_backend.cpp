@@ -41,7 +41,7 @@ struct BasicBackend final : public Backend {
 
     // Scheduling information
     std::thread scheduler_thread;
-    std::mutex scheduler_mutex;
+    std::recursive_mutex scheduler_mutex;
     int sleep_interval = 5;     // millisecond
 
     // DL training information
@@ -84,7 +84,7 @@ struct BasicBackend final : public Backend {
         // Step 3: Init scheduler thread for active scheduler
         if (scheduler->isActiveScheduler()) {
             scheduler_thread = std::thread([this]() {
-                std::unique_lock<std::mutex>{scheduler_mutex};
+                std::unique_lock<std::recursive_mutex>{scheduler_mutex};
                 while (inited) {
                     scheduler->schedule();
                     std::this_thread::sleep_for(std::chrono::milliseconds{sleep_interval});

@@ -20,7 +20,7 @@ int main(int argc, char** argv) {
     frontend.setLogger(&logger);
 
     std::unordered_map<std::string, mori::TensorStatus> tensor_status;
-    tensor_status.insert(std::make_pair("t", mori::TensorStatus("t", 1024, mori::MemoryType::all)));
+    tensor_status.insert(std::make_pair("t", mori::TensorStatus("t", 1024, mori::MemoryType::inout)));
     
     mori::OperatorStatus o1_status("o1", {}, {"o2"}, tensor_status);
     mori::OperatorStatus o2_status("o2", {"o1"}, {"o3"}, tensor_status);
@@ -37,50 +37,44 @@ int main(int argc, char** argv) {
 
     // Forward propagation op1
     session.allocateMemory("o1", "t");
-    session.setMemoryDataAssigned("o1", "t");
-    session.withData("o1", []() {
-        std::cout<<"o1\n";
-    });
+    auto r1 = session.waitData("o1");
+    r1.setMemoryDataAssigned("o1", "t");
+    r1.releaseData();
 
     // Forward propagation op2
     session.allocateMemory("o2", "t");
-    session.setMemoryDataAssigned("o2", "t");
-    session.withData("o2", []() {
-        std::cout<<"o2\n";
-    });
+    auto r2 = session.waitData("o2");
+    r2.setMemoryDataAssigned("o2", "t");
+    r2.releaseData();
 
     // Forward propagation op3
     session.allocateMemory("o3", "t");
-    session.setMemoryDataAssigned("o3", "t");
-    session.withData("o3", []() {
-        std::cout<<"o3\n";
-    });
+    auto r3 = session.waitData("o3");
+    r3.setMemoryDataAssigned("o3", "t");
+    r3.releaseData();
 
     // Backward propagation op3
-    session.withData("o3", []() {
-        std::cout<<"o3\n";
-    });
-    session.setMemoryDataAcquired("o3", "t");
+    auto r3b = session.waitData("o3");
+    r3b.setMemoryDataAcquired("o3", "t");
+    r3b.releaseData();
     session.freeMemory("o3", "t");
 
     // Backward propagation op2
-    session.withData("o2", []() {
-        std::cout<<"o2\n";
-    });
-    session.setMemoryDataAcquired("o2", "t");
+    auto r2b = session.waitData("o2");
+    r2b.setMemoryDataAcquired("o2", "t");
+    r2b.releaseData();
     session.freeMemory("o2", "t");
 
     // Backward propagation op1
-    session.withData("o1", []() {
-        std::cout<<"o1\n";
-    });
-    session.setMemoryDataAcquired("o1", "t");
+    auto r1b = session.waitData("o1");
+    r1b.setMemoryDataAcquired("o1", "t");
+    r1b.releaseData();
     session.freeMemory("o1", "t");
 
     session.terminate();
     frontend.terminate();
     
-    std::cout<<"hello world!\n";
+    std::cout<<"Hello world!\n";
     return 0;
 }
 
