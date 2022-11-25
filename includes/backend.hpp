@@ -9,11 +9,23 @@ namespace mori {
 // Abstract struct
 struct Backend {
     virtual void init() = 0;
-    virtual void registerOperator(const OperatorStatus& operator_status) = 0;
-    virtual void submitEvent(const MemoryEvent& event) = 0;
-    virtual std::vector<ScheduleEvent> getScheduleEvents() = 0;
-    virtual void unregisterOperator(const std::string& op) = 0;
+
+    virtual void registerTensor(const status::Tensor&) = 0;
+    virtual void registerOperator(const status::Operator& operator_status) {}
+    virtual void setEntry(const std::string& _op) {}
+
+    virtual void start() {}
+
+    virtual void submitEvent(const events::MemoryEvent& event) = 0;
+    virtual std::vector<events::ScheduleEvent> getScheduleEvents() = 0;
+
+    virtual void stop() {}
+
+    virtual void unregisterTensor(const std::string&) = 0;
+    virtual void unregisterOperator(const std::string& op) {}
+
     virtual void terminate() = 0;
+    
     virtual ~Backend() {};
 };  // struct Backend
 

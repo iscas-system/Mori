@@ -1,28 +1,34 @@
-.PHONY: header library all usage
+.PHONY: header library all usage exporters build_dir
 
 default: all
 
 CC = clang++
+STD = c++17
 
-header:
-	@$(CC) -I . -DSINGLE_HEADER_LIBRARY $(CFLAGS) -E frontend/libmori.hpp | grep -v "# " > libmori.hpp_definations
-	@cat includes/stdlibs.hpp | grep -v "#define SINGLE_HEADER_LIBRARY" | grep -v "#ifndef SINGLE_HEADER_LIBRARY" | grep -v "#endif" > libmori.hpp_includes
-	@cat libmori.hpp_definations >> libmori.hpp_includes
-	@mv libmori.hpp_includes libmori.hpp
-	@rm -rf libmori.hpp_definations
+QUOM = ../quom/proc
 
-library:
-	@$(CC) -I . -std=c++17 -shared -fPIC -o libmori.so backend/basic_backend.cpp
+build_dir:
+	mkdir -p build
 
-all: header library
-	@$(CC) -I . -std=c++17 main.cpp -L. -lmori -o main
+header: build_dir
+	@$(QUOM) -I . frontend/libmori.hpp build/libmori.hpp
+
+library: build_dir
+	@$(CC) -I . -std=$(STD) -shared -fPIC -o build/libmori.so backend/backend_entry.cpp
+
+exporters: build_dir
+	@$(MAKE) -f exporters/Makefile -e CC='${CC}' STD='${STD}'
+
+all: header library exporters
+	@$(CC) -I . -std=$(STD) main.cpp -Lbuild -lmori -o main
 
 clean:
-	@rm -rf libmori.so libmori.hpp main main.dSYM
+	@rm -rf build
+	@rm -rf main main.dSYM
 
 usage:
 	@echo "Usages:"
 	@echo "  CFLAGS=-Dmacros"
 	@echo
-	@echo "Macros"
-	@echo "  ENABLE_INTEGRATED_BACKEND"
+	@echo "Macros:"
+	@echo "  ENABLE_EXTERNAL_BACKEND: Enable external backend support. Including Dylib / Shared Memory / Unix Socket / HTTP backends."

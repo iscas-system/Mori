@@ -1,35 +1,62 @@
 #pragma once
 
-#include "includes/stdlibs.hpp"
+#include <string>
+#include <sstream>
+#include <chrono>
 
 namespace mori {
+namespace events {
 
-enum MemoryEventType {
-    allocate, write, read, access, free
+enum class MemoryEventType {
+    allocate, write, read, access, swapin, swapout, free
 };  // enum MemoryEventType
 
-struct MemoryEvent {
-    std::string op;
+namespace util {
+    static std::string get_event_type_str(const MemoryEventType& type) {
+        switch (type) {
+            case MemoryEventType::allocate:
+                return "allocate";
+            case MemoryEventType::write:
+                return "write";
+            case MemoryEventType::read:
+                return "read";
+            case MemoryEventType::access:
+                return "access";
+            case MemoryEventType::swapin:
+                return "swapin";
+            case MemoryEventType::swapout:
+                return "swapout";
+            case MemoryEventType::free:
+                return "free";
+        }
+
+        assert(0);
+        return "";
+    }
+
+    static long get_timestamp_val(const std::chrono::steady_clock::time_point& timestamp) {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(timestamp.time_since_epoch()).count();
+    }
+}   // namespace util
+
+struct MemoryEvent final {
     std::string tensor;
     MemoryEventType type;
     std::chrono::steady_clock::time_point timestamp;
 
     MemoryEvent() {
-        op = "";
         tensor = "";
         type = MemoryEventType::access;
         timestamp = std::chrono::steady_clock::now();
     }
 
-    MemoryEvent(const std::string& _op, const std::string& _tensor, MemoryEventType _type, const std::chrono::steady_clock::time_point& _timestamp) {
-        op = _op;
+    MemoryEvent(const std::string& _tensor, MemoryEventType _type, const std::chrono::steady_clock::time_point& _timestamp) {
         tensor = _tensor;
         type = _type;
         timestamp = _timestamp;
     }
 
-    MemoryEvent(const std::string& _op, const std::string& _tensor, MemoryEventType _type) {
-        op = _op;
+    MemoryEvent(const std::string& _tensor, MemoryEventType _type) {
         tensor = _tensor;
         type = _type;
         timestamp = std::chrono::steady_clock::now();
@@ -41,37 +68,14 @@ struct MemoryEvent {
     bool operator<(const MemoryEvent& event) const {return timestamp < event.timestamp;}
 
     operator std::string() const {
-        std::string typestr;
-        switch (type) {
-            case allocate:
-                typestr = "allocate";
-                break;
-            case write:
-                typestr = "write";
-                break;
-            case read:
-                typestr = "read";
-                break;
-            case access:
-                typestr = "access";
-                break;
-            case free:
-                typestr = "free";
-                break;
-            default:
-                typestr = "access";
-                break;
-        }
+        std::string typestr = util::get_event_type_str(type);
 
         std::stringstream ss;
-        ss<<"Timestamp: "<<std::chrono::duration_cast<std::chrono::milliseconds>(timestamp.time_since_epoch()).count()<<" operator: "<<op<<" tensor: "<<tensor<<" type: "<<typestr;
+        ss<<"Timestamp: "<<util::get_timestamp_val(timestamp)<<" tensor: "<<tensor<<" type: "<<typestr;
         return ss.str();
     }
 
 };  // struct MemoryEvents
 
-static MemoryEvent make_memory_event(const std::string& _op, const std::string& _tensor, MemoryEventType _type) {
-    return MemoryEvent(_op, _tensor, _type);
-}
-
+}   // namespace events
 }   // namespace mori

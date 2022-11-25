@@ -1,8 +1,7 @@
 #pragma once
 
-#include "includes/stdlibs.hpp"
-
 namespace mori {
+namespace events {
 
 enum class ScheduleEventType {
     allocate, 
@@ -23,4 +22,5 @@ struct ScheduleEvent {
     ScheduleEvent(const std::string& _operator_name, const std::string& _tensor_name, int _interval, ScheduleEventType _type): operator_name(_operator_name), tensor_name(_tensor_name), interval(_interval), type(_type) {}
 };  // struct ScheduleEvent
 
+}   // namespace events
 }   // namespace mori

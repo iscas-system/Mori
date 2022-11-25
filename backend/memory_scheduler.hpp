@@ -1,10 +1,9 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include <atomic>
 #include <mutex>
-#include <iostream>
-#include <condition_variable>
 
 #include "includes/backend.hpp"
 #include "includes/memory_event.hpp"
@@ -31,8 +30,7 @@ struct MemoryScheduler {
     }
 
     /**
-     * isActiveScheduler
-     * Inform that if the scheduler activelly schedule the memory swapping
+     * Inform that if the scheduler activelly schedule the memory swapping.
      * Active scheduler realtime automatically triggers memory swapping, while proactive scheduler only responds to memory events.
      * @return if the scheduler is an active scheduler.
      */
@@ -42,7 +40,7 @@ struct MemoryScheduler {
 
     virtual void schedule() {
         if (false) {
-            int curr_sched_iteration = 0;
+            // int curr_sched_iteration = 0;
             {
             }
 
@@ -54,9 +52,9 @@ struct MemoryScheduler {
      * onMemoryEvent
      * Action when new memory event is submitted.
      */
-    virtual void onMemoryEvent(const MemoryEvent& event) {
+    virtual void onMemoryEvent(const events::MemoryEvent& event) {
         switch(event.type) {
-            case allocate:
+            case events::MemoryEventType::allocate:
                 // Proactive memory scheduler only need to schedule when memory is insufficient.
                 break;
             default:
@@ -67,11 +65,11 @@ struct MemoryScheduler {
     virtual void onIncreaseIteration() {
     }
     
-    virtual std::vector<ScheduleEvent> getScheduleEvents() {
-        return std::vector<ScheduleEvent>();
+    virtual std::vector<events::ScheduleEvent> getScheduleEvents() {
+        return std::vector<events::ScheduleEvent>();
     }
 
-    virtual void submitEvent(MemoryEvent event) {
+    virtual void submitEvent(events::MemoryEvent event) {
         if (!inited) throw uninited_exception();
         onMemoryEvent(event);
     }

@@ -1,25 +1,58 @@
 #pragma once
 
-#include "includes/stdlibs.hpp"
 #include "includes/exceptions.hpp"
 
 namespace mori {
 
 struct Context final {
+public:
+    struct View final {
+    protected:
+        friend struct Context;
+        
+    protected:
+        const Context& context;
+        std::string prefix;
+
+        View(const Context& _context, const std::string& _prefix): context(_context), prefix(_prefix) {}
+
+        std::string make_target_key(const std::string& key) const {
+            std::string target_key = prefix;
+            if (key != "") target_key = prefix + "." + key;
+            return target_key;
+        }
+
+    public:
+        const std::string& at(const std::string& key) const { return context.at(make_target_key(key)); }
+        const std::string& at() const { return context.at(prefix); }
+        bool signal(const std::string& key) const { return context.signal(make_target_key(key)); }
+        bool isParamExists(const std::string& key) const { return context.isParamExists(make_target_key(key)); }
+        bool isDefaultParam(const std::string& key) const { return context.isDefaultParam(make_target_key(key)); }
+
+        View view(const std::string& _prefix) const {
+            std::string target = prefix;
+            if (_prefix != "") {
+                target.push_back('.');
+                target += _prefix;
+            }
+
+            return View(context, target);
+        }
+    };  // struct ContextView
+
 protected:
-    std::map<std::string, std::string> defaults;
-    std::map<std::string, std::string> contexts;
+    std::unordered_map<std::string, std::string> defaults;
+    std::unordered_map<std::string, std::string> contexts;
 
     void prepareDefaultParams() {
-        defaults.insert(std::make_pair("path", "int://local"));
-        defaults.insert(std::make_pair("scheduler", "fifo"));
-        defaults.insert(std::make_pair("scheduler.trigger_event", "dependency"));
+        defaults.emplace("path", "int://local");
+        defaults.emplace("scheduler", "fifo");
+        defaults.emplace("scheduler.trigger_event", "dependency");
 
-        // Operator parameters
-        //  external_inputs: Operator leverages external input tensors (e.g., memory reuse)
-        // defaults.insert(std::make_pair("operators.external_inputs", "1"));
-        // defaults.insert(std::make_pair("operators.external_weights", "1"));
-        // defaults.insert(std::make_pair("operators.external_constants", "1"));
+        defaults.emplace("exporters.events", "empty");
+        defaults.emplace("exporters.events.method", "empty");
+        defaults.emplace("exporters.tensors", "empty");
+        defaults.emplace("exporters.tensors.method", "empty");
     }
 
 public:
@@ -107,6 +140,10 @@ public:
         if (p != defaults.end()) return true;
 
         return false;
+    }
+
+    View view(const std::string& prefix) const {
+        return View(*this, prefix);
     }
 
     friend std::istream& operator>>(std::istream& in, const Context& context) {

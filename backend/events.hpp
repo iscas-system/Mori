@@ -6,9 +6,11 @@
 #include <map>
 #include <utility>
 
+#include "backend/events_exporter.hpp"
 #include "includes/memory_event.hpp"
 
 namespace mori {
+namespace events {
 
 struct EventSet {
     std::multimap<int, MemoryEvent> events;
@@ -61,6 +63,8 @@ struct Events {
     int iteration = 0;
     std::multimap<int, MemoryEvent> events;
 
+    Events() = default;
+
     void submitEvent(const MemoryEvent& event) {
         events.insert(std::make_pair(iteration, event));
     }
@@ -77,6 +81,8 @@ struct Events {
         return from().select(cond);
     }
 
+    ~Events() = default;
+
 };  // struct Events
 
 /**
@@ -91,4 +97,5 @@ static inline EventSet from(const Events& events) {
     return events.from();
 }
 
+}   // namespace events
 }   // namespace mori

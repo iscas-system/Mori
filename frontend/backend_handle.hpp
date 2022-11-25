@@ -1,7 +1,5 @@
 #pragma once
 
-#include "includes/stdlibs.hpp"
-
 #include "includes/backend.hpp"
 #include "includes/context.hpp"
 #include "includes/logging.hpp"
@@ -9,9 +7,13 @@
 #include "includes/memory_event.hpp"
 #include "includes/exceptions.hpp"
 
-namespace mori {
-
+#ifndef ENABLE_EXTERNAL_BACKEND
+#include "includes/basic_backend.hpp"
+#else
 extern "C" int backend_entry(std::unique_ptr<Backend>& ptr, const Context& _context);
+#endif
+
+namespace mori {
 
 struct BackendHandle {
     bool inited = false;
@@ -28,13 +30,19 @@ struct BackendHandle {
 
     virtual void init() = 0;
 
-    virtual void registerOperator(const OperatorStatus& operator_status) = 0;
+    virtual void registerTensor(const status::Tensor&) = 0;
+    virtual void registerOperator(const status::Operator&) {}
+    virtual void setEntry(const std::string& _op) {}
 
-    virtual void submitEvent(const MemoryEvent& event) = 0;
+    virtual void start() {}
+    
+    virtual void submitEvent(const events::MemoryEvent& event) = 0;
+    virtual std::vector<events::ScheduleEvent> getScheduleEvents() = 0;
 
-    virtual std::vector<ScheduleEvent> getScheduleEvents() = 0;
+    virtual void stop() {}
 
-    virtual void unregisterOperator(const std::string& op) = 0;
+    virtual void unregisterTensor(const std::string&) = 0;
+    virtual void unregisterOperator(const std::string&) {}
 
     virtual void terminate() {
         if (!inited) throw uninited_exception();
@@ -50,36 +58,49 @@ struct BackendHandle {
 struct LocalBackendHandle : public BackendHandle {
     std::unique_ptr<Backend> backend;
 
-    LocalBackendHandle(Context _context) {}
+    LocalBackendHandle() {}
     LocalBackendHandle(LocalBackendHandle&& backend_handle) {
         backend = std::move(backend_handle.backend);
     }
 
-    virtual void init() {
+    virtual void init() override {
         if (inited) return;
         backend->init();
         inited = true;
     }
 
-    virtual void registerOperator(const OperatorStatus& operator_status) {
-        backend->registerOperator(operator_status);
+    virtual void registerTensor(const status::Tensor& _tensor) override {
+        backend->registerTensor(_tensor);
+    }
+    virtual void registerOperator(const status::Operator& _operator) override {
+        backend->registerOperator(_operator);
+    }
+    virtual void setEntry(const std::string& _operator) override {
+        backend->setEntry(_operator);
     }
 
-    virtual void submitEvent(const MemoryEvent& event) {
+    virtual void start() override { backend->start(); }
+
+    virtual void submitEvent(const events::MemoryEvent& event) override {
         (*logger)<<LogLevel::info<<"Submiting of event "<<event;
         logger->flush();
         backend->submitEvent(event);
     }
 
-    virtual std::vector<ScheduleEvent> getScheduleEvents() {
+    virtual std::vector<events::ScheduleEvent> getScheduleEvents() override {
         return backend->getScheduleEvents();
     }
 
-    virtual void unregisterOperator(const std::string& op) {
-        backend->unregisterOperator(op);
+    virtual void stop() override { backend->stop(); }
+
+    virtual void unregisterTensor(const std::string& _tensor) override {
+        backend->unregisterTensor(_tensor);
+    }
+    virtual void unregisterOperator(const std::string& _operator) override {
+        backend->unregisterOperator(_operator);
     }
 
-    virtual void terminate() {
+    virtual void terminate() override {
         if (!inited) throw uninited_exception();
 
         backend->terminate();
@@ -92,20 +113,17 @@ struct LocalBackendHandle : public BackendHandle {
     }
 };  // struct LocalBackendHandle
 
-#ifdef ENABLE_INTEGRATED_BACKEND
+#ifndef ENABLE_EXTERNAL_BACKEND
 /**
- * IntegratedHandle
+ * Handle for integrated library backend.
  */
 struct IntegratedBackendHandle : public LocalBackendHandle {
-    IntegratedBackendHandle(const Context& _context): LocalBackendHandle(_context) {
-        int ret = backend_entry(backend, _context);
-		if (ret != 0) throw backend_exception();
+    IntegratedBackendHandle(const Context& _context) {
+        backend.reset(new mori::BasicBackend(_context));
     }
 };  // struct IntegratedBackendHandle
-#endif
-
+#else
 /**
- * DLBackendHandle
  * Handle for dynamic library backend.
  */
 struct DylibBackendHandle : public LocalBackendHandle {
@@ -134,6 +152,8 @@ struct DylibBackendHandle : public LocalBackendHandle {
     }
 };  // struct DylibBackendHandle
 
+#ifdef ENABLE_REMOTE_BACKEND
+
 /**
  * RemoteBackendHandle
  * Handle for remote library backend.
@@ -154,17 +174,22 @@ struct DylibBackendHandle : public LocalBackendHandle {
 //     HTTPBackendHandle(const std::string& path) {}
 //     ~HTTPBackendHandle() {}
 // };  // struct HTTPBackendHandle
+#endif
+#endif
 
 static std::unique_ptr<BackendHandle> make_backend_handle(const Context& context) {
     // if (!context.isParamExists("path")) throw context_missing();
 
     const std::string& path = context.at("path");
-#ifdef ENABLE_INTEGRATED_BACKEND
+#ifndef ENABLE_EXTERNAL_BACKEND
     if (path.find("int://") == 0) return std::unique_ptr<BackendHandle>(new IntegratedBackendHandle(context));
-#endif
+#else
     if (path.find("dylib://") == 0) return std::unique_ptr<BackendHandle>(new DylibBackendHandle(context));
-    //else if (path.find("http://") == path.begin()) return std::unique_ptr<BackendHandle>(new RemoteBackendHandle(_context));
-    //else if (path.find("https://") == path.begin()) return std::unique_ptr<BackendHandle>(new RemoteBackendHandle(_context));
+#ifdef ENABLE_REMOTE_BACKEND
+    if (path.find("http://") == path.begin()) return std::unique_ptr<BackendHandle>(new RemoteBackendHandle(_context));
+    if (path.find("https://") == path.begin()) return std::unique_ptr<BackendHandle>(new RemoteBackendHandle(_context));
+#endif
+#endif
     else throw context_invalid("path");
 }
 

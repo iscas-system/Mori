@@ -6,29 +6,8 @@
 
 #include "frontend/libmori.hpp"
 
-struct LoggingMemoryManager : public mori::MemoryManager {
-    virtual void* allocate(size_t size) {
-        std::cout<<size<<" allocated.\n";
-        return reinterpret_cast<void*>(10086);
-    }
-    virtual void* copyIn(void* address, size_t size) {
-        std::cout<<size<<" copied in.\n";
-        return reinterpret_cast<void*>(10086);
-    }
-    virtual void* copyOut(void* address, size_t size) {
-        std::cout<<size<<" copied out.\n";
-        return reinterpret_cast<void*>(10001);
-    }
-    virtual void freeDevice(void* address) {
-        std::cout<<address<<" freed on device.\n";
-    }
-    virtual void freeHost(void* address) {
-        std::cout<<address<<" freed on host.\n";
-    }
-};  // struct LoggingMemoryManager
-
 struct DemoMemoryManager : public mori::MemoryManager{
-    std::mutex m;
+    std::recursive_mutex m;
 
     void* host_memory_pool;
 
@@ -43,7 +22,7 @@ struct DemoMemoryManager : public mori::MemoryManager{
     }
 
     virtual void* allocate(size_t size) {
-        std::unique_lock<std::mutex>{m};
+        std::unique_lock<std::recursive_mutex>{m};
 
         // Assume 2 MB of device memory.
         if (total_size + size > 1024*2) return nullptr;
@@ -57,7 +36,7 @@ struct DemoMemoryManager : public mori::MemoryManager{
     }
 
     virtual void* copyIn(void* address, size_t size) {
-        std::unique_lock<std::mutex>{m};
+        std::unique_lock<std::recursive_mutex>{m};
 
         // Check if allocated host memory.
         auto p = host_map.find(address);
@@ -76,7 +55,7 @@ struct DemoMemoryManager : public mori::MemoryManager{
     }
 
     virtual void* copyOut(void* address, size_t size) {
-        std::unique_lock<std::mutex>{m};
+        std::unique_lock<std::recursive_mutex>{m};
 
         // Check if allocated device memory.
         auto p = device_map.find(address);
@@ -94,7 +73,7 @@ struct DemoMemoryManager : public mori::MemoryManager{
     }
 
     virtual void freeDevice(void* address) {
-        std::unique_lock<std::mutex>{m};
+        std::unique_lock<std::recursive_mutex>{m};
 
         // Check if allocated device memory.
         auto p = device_map.find(address);
@@ -107,7 +86,7 @@ struct DemoMemoryManager : public mori::MemoryManager{
     }
 
     virtual void freeHost(void* address) {
-        std::unique_lock<std::mutex>{m};
+        std::unique_lock<std::recursive_mutex>{m};
 
         // Check if allocated host memory.
         auto p = host_map.find(address);

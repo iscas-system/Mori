@@ -8,7 +8,6 @@
 			"args": [
 				"-I",
 				".",
-				"-DENABLE_INTEGRATED_BACKEND",
 				"-std=c++17",
 				"-fdiagnostics-color=always",
 				"-g",

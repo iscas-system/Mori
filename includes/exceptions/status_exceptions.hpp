@@ -3,40 +3,30 @@
 namespace mori {
 
 struct status_exception : public std::exception {
-    status_exception() = default;
-    status_exception(const status_exception& exception) = default;
+protected:
+    std::string reason = "Status exception.";
 
-    status_exception& operator=(const status_exception& exception) = default;
-    virtual const char* what() const throw() {
-        return "Status exception.";
+public:
+    status_exception() = default;
+    status_exception(const std::string& _reason): reason(_reason) {}
+    status_exception(const status_exception&) = default;
+    status_exception& operator=(const status_exception&) = default;
+
+    virtual const char* what() const noexcept override {
+        return reason.c_str();
     }
 
     virtual ~status_exception() = default;
 };  // struct status_exception
 
 struct uninited_exception : public status_exception {
-    virtual const char* what() const throw() {
-        return "Not inited.";
-    }
+    uninited_exception() { reason = "Not inited."; }
+    uninited_exception(const std::string& _reason): status_exception(_reason) {}
 };  // struct uninited_exception
 
 struct inited_exception : public status_exception {
-    virtual const char* what() const throw() {
-        return "Already inited.";
-    }
+    inited_exception() { reason = "Already inited."; }
+    inited_exception(const std::string& _reason): status_exception(_reason) {}
 };  // struct inited_exception
-
-struct status_error : public status_exception {
-    std::string reason;
-
-    status_error(const std::string& _reason): reason(_reason) {}
-    status_error(const status_error& exception) = default;
-
-    status_error& operator=(const status_error& exception) = default;
-
-    virtual const char* what() const throw() {
-        return reason.c_str();
-    }
-};  // struct status_error
 
 }   // namespace mori
