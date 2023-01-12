@@ -51,39 +51,26 @@ protected:
     std::recursive_mutex scheduler_mutex;
     int sleep_interval = 5;     // millisecond
 
-    // DL training information
-    std::atomic<int> iteration = 0;
-
 public:
     BasicBackend(Context _context) {
         context = _context;
 
         // Set up scheduler
         std::string scheduler_name = context.at("scheduler");
-        if (scheduler_name == "fifo") scheduler = std::unique_ptr<MemoryScheduler>(new FIFOMemoryScheduler());
-        else if (scheduler_name == "dependency") scheduler = std::unique_ptr<MemoryScheduler>(new DependencyAwareMemoryScheduler());
-        else if (scheduler_name == "maxsize") scheduler = std::unique_ptr<MemoryScheduler>(new MaximumSizePriorityMemoryScheduler());
-        else if (scheduler_name == "rwaware") scheduler = std::unique_ptr<MemoryScheduler>(new RWAwareMemoryScheduler());
-        else {
-            typedef int(*SchedulerEntryType)(std::unique_ptr<MemoryScheduler>&);
-            scheduler_hinst = utils::load_dylib<SchedulerEntryType>("Scheduler", context.at("scheduler.path"), "scheduler_entry", scheduler);
-        }
+        if (scheduler_name == "fifo") scheduler = std::unique_ptr<MemoryScheduler>(new FIFOMemoryScheduler(context, status, events));
+        else if (scheduler_name == "dependency") scheduler = std::unique_ptr<MemoryScheduler>(new DependencyAwareMemoryScheduler(context, status, events));
+        else if (scheduler_name == "maxsize") scheduler = std::unique_ptr<MemoryScheduler>(new MaximumSizePriorityMemoryScheduler(context, status, events));
+        else scheduler_hinst = utils::load_dylib("Scheduler", context.at("scheduler.path"), "scheduler_entry", scheduler);
 
         // Set up events exporter
         std::string events_exporter_name = context.at("exporters.events");
         if (events_exporter_name == "empty") events_exporter = std::unique_ptr<exporter::EventsExporter>(new exporter::EventsExporter(context));
-        else {
-            typedef int(*EventsExporterType)(std::unique_ptr<exporter::EventsExporter>&, const Context&);
-            events_exporter_hinst = utils::load_dylib<EventsExporterType>("Events Exporter", context.at("exporters.events.path"), "events_exporter_entry", events_exporter, context);
-        }
+        else events_exporter_hinst = utils::load_dylib("Events Exporter", context.at("exporters.events.path"), "events_exporter_entry", events_exporter, context.view());
 
         // Set up tensors exporter
         std::string tensors_exporter_name = context.at("exporters.tensors");
         if (tensors_exporter_name == "empty") tensors_exporter = std::unique_ptr<exporter::TensorsExporter>(new exporter::TensorsExporter(context));
-        else {
-            typedef int(*TensorsExporterType)(std::unique_ptr<exporter::TensorsExporter>&, const Context&);
-            tensors_exporter_hinst = utils::load_dylib<TensorsExporterType>("Tensors Exporter", context.at("exporters.tensors.path"), "tensors_exporter_entry", tensors_exporter, context);
-        }
+        else tensors_exporter_hinst = utils::load_dylib("Tensors Exporter", context.at("exporters.tensors.path"), "tensors_exporter_entry", tensors_exporter, context.view());
     }
 
     virtual void init() override {
@@ -120,18 +107,18 @@ public:
         started = true;
 
         // Init scheduler
-        scheduler->init();
-        if (scheduler->isActiveScheduler()) {
-            scheduler_thread = std::thread([this]() {
-                std::unique_lock<std::recursive_mutex>{scheduler_mutex};
-                while (started) {
-                    scheduler->schedule();
-                    std::this_thread::sleep_for(std::chrono::milliseconds{sleep_interval});
-                }
-            });
-            // Examine if the thread starts properly
-            while (!scheduler_thread.joinable());
-        }
+        // scheduler->init();
+        // if (scheduler->isActiveScheduler()) {
+        //     scheduler_thread = std::thread([this]() {
+        //         std::unique_lock<std::recursive_mutex>{scheduler_mutex};
+        //         while (started) {
+        //             scheduler->schedule();
+        //             std::this_thread::sleep_for(std::chrono::milliseconds{sleep_interval});
+        //         }
+        //     });
+        //     // Examine if the thread starts properly
+        //     while (!scheduler_thread.joinable());
+        // }
     }
 
     virtual void submitEvent(const events::MemoryEvent& event) override {
@@ -143,7 +130,7 @@ public:
         scheduler->submitEvent(event);
     }
 
-    virtual std::vector<events::ScheduleEvent> getScheduleEvents() override {
+    virtual events::ScheduleEvents getScheduleEvents() override {
         if (!inited) throw uninited_exception();
         if (!started) throw uninited_exception();
         return scheduler->getScheduleEvents();
@@ -157,22 +144,28 @@ public:
     virtual int getIteration() {
         if (!inited) throw uninited_exception();
         if (!started) throw uninited_exception();
-        return iteration;
+        return events.getIteration();
     }
 
+    virtual void setIteration(int _iteration) override { events.setIteration(_iteration); }
+
     /**
-     * increaseIteration
-     * Increase the iteration counting of DL training
-     * Since Mori should schedule the swapping in current iteration, this method may block the training until the scheduler is synchorized with backend and DL training.
+     * newIteration
+     * Increase the iteration counting of application
+     * Since Mori should schedule the swapping in current iteration, this method may block the training until the scheduler is synchorized with backend and application.
      * @return iteration
      */
-    virtual int increaseIteration() {
+    virtual void newIteration() override {
         if (!inited) throw uninited_exception();
         if (!started) throw uninited_exception();
-        ++iteration;
         // Block to synchorize with scheduler.
-        scheduler->increaseIteration();
-        return iteration;
+        events.newIteration();
+        scheduler->newIteration();
+    }
+
+    virtual void halfIteration() override {
+        if (!inited) throw uninited_exception();
+        if (!started) throw uninited_exception();
     }
 
     virtual void stop() override {
@@ -182,8 +175,6 @@ public:
         started = false;
         // Examine if the thread terminates properly
         if (scheduler_thread.joinable()) scheduler_thread.join();
-
-        scheduler->terminate();
     }
 
     virtual void unregisterTensor(const std::string& tensor) override {

@@ -54,10 +54,7 @@ struct EventsExporter {
         Context::View context_view = context.view("exporters.events.method");
         if (export_method_name == "empty") export_method.reset(new exportimpl::ExportMethod(context_view));
         else if (export_method_name == "file") export_method.reset(new exportimpl::FileExportMethod(context_view));
-        else {
-            typedef int(*ExportMethodType)(std::unique_ptr<exportimpl::ExportMethod>&, const Context::View&);
-            hInst = utils::load_dylib<ExportMethodType>("Events Export Method", context.at("exporters.events.method.path"), "export_method_entry", export_method, context_view);
-        }
+        else hInst = utils::load_dylib("Events Export Method", context.at("exporters.events.method.path"), "export_method_entry", export_method, context_view);
     }
 
     virtual void onEvent(const events::MemoryEvent& event) {}
@@ -76,10 +73,7 @@ struct TensorsExporter {
         Context::View context_view = context.view("exporters.tensors.method");
         if (export_method_name == "empty") export_method.reset(new exportimpl::ExportMethod(context_view));
         else if (export_method_name == "file") export_method.reset(new exportimpl::FileExportMethod(context_view));
-        else {
-            typedef int(*ExportMethodType)(std::unique_ptr<exporter::ExportMethod>&, const Context::View&);
-            hInst = utils::load_dylib<ExportMethodType>("Events Export Method", context.at("exporters.tensors.method.path"), "export_method_entry", export_method, context_view);
-        }
+        else hInst = utils::load_dylib("Events Export Method", context.at("exporters.tensors.method.path"), "export_method_entry", export_method, context_view);
     }
     virtual void onTensor(const status::Tensor& tensor) {}
     virtual void onOperator(const status::Operator& operator_status) {}

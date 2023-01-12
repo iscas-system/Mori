@@ -82,7 +82,8 @@
         "stack": "cpp",
         "valarray": "cpp",
         "cassert": "cpp",
-        "*.txt": "cpp"
+        "*.txt": "cpp",
+        "filesystem": "cpp"
     },
     "C_Cpp.errorSquiggles": "Disabled"
 }

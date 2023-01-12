@@ -37,7 +37,11 @@ struct BackendHandle {
     virtual void start() {}
     
     virtual void submitEvent(const events::MemoryEvent& event) = 0;
-    virtual std::vector<events::ScheduleEvent> getScheduleEvents() = 0;
+    virtual events::ScheduleEvents getScheduleEvents() = 0;
+
+    virtual void setIteration(int _iteration) = 0;
+    virtual void newIteration() = 0;
+    virtual void halfIteration() = 0;
 
     virtual void stop() {}
 
@@ -87,7 +91,11 @@ struct LocalBackendHandle : public BackendHandle {
         backend->submitEvent(event);
     }
 
-    virtual std::vector<events::ScheduleEvent> getScheduleEvents() override {
+    virtual void setIteration(int _iteration) override { backend->setIteration(_iteration); }
+    virtual void newIteration() override { backend->newIteration(); }
+    virtual void halfIteration() override { backend->halfIteration(); }
+
+    virtual events::ScheduleEvents getScheduleEvents() override {
         return backend->getScheduleEvents();
     }
 

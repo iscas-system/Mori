@@ -146,6 +146,8 @@ public:
         return View(*this, prefix);
     }
 
+    inline View view() const { return view(""); }
+
     friend std::istream& operator>>(std::istream& in, const Context& context) {
         return in;
     }

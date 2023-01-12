@@ -41,10 +41,6 @@ protected:
 
         virtual MemorySession& getSession() = 0;
 
-        virtual int getIteration() const = 0;
-        virtual void setIteration(int iteration) = 0;
-        virtual void increaseIteration() = 0;
-
         virtual void updateSchedule() = 0;
 
         virtual void unregisterTensor(const std::string& tensor) = 0;
@@ -125,21 +121,21 @@ protected:
             throw uninited_exception();
         }
 
-        virtual int getIteration() const override {
-            (*frontend.logger)<<LogLevel::error<<"Frontend uninitialized.";
-            frontend.logger->flush();
-            throw uninited_exception();
-        }
-        virtual void setIteration(int iteration) override {        
-            (*frontend.logger)<<LogLevel::error<<"Frontend uninitialized.";
-            frontend.logger->flush();
-            throw uninited_exception();
-        }
-        virtual void increaseIteration() override {        
-            (*frontend.logger)<<LogLevel::error<<"Frontend uninitialized.";
-            frontend.logger->flush();
-            throw uninited_exception();
-        }
+        // virtual int getIteration() const override {
+        //     (*frontend.logger)<<LogLevel::error<<"Frontend uninitialized.";
+        //     frontend.logger->flush();
+        //     throw uninited_exception();
+        // }
+        // virtual void setIteration(int iteration) override {        
+        //     (*frontend.logger)<<LogLevel::error<<"Frontend uninitialized.";
+        //     frontend.logger->flush();
+        //     throw uninited_exception();
+        // }
+        // virtual void newIteration() override {        
+        //     (*frontend.logger)<<LogLevel::error<<"Frontend uninitialized.";
+        //     frontend.logger->flush();
+        //     throw uninited_exception();
+        // }
 
         virtual void updateSchedule() override {
             (*frontend.logger)<<LogLevel::error<<"Updating schedule while frontend not initialized.";
@@ -243,21 +239,21 @@ protected:
             throw uninited_exception();
         }
 
-        virtual int getIteration() const override {
-            (*frontend.logger)<<LogLevel::error<<"Frontend not started.";
-            frontend.logger->flush();
-            throw uninited_exception();
-        }
-        virtual void setIteration(int iteration) override {        
-            (*frontend.logger)<<LogLevel::error<<"Frontend not started.";
-            frontend.logger->flush();
-            throw uninited_exception();
-        }
-        virtual void increaseIteration() override {        
-            (*frontend.logger)<<LogLevel::error<<"Frontend not started.";
-            frontend.logger->flush();
-            throw uninited_exception();
-        }
+        // virtual int getIteration() const override {
+        //     (*frontend.logger)<<LogLevel::error<<"Frontend not started.";
+        //     frontend.logger->flush();
+        //     throw uninited_exception();
+        // }
+        // virtual void setIteration(int iteration) override {        
+        //     (*frontend.logger)<<LogLevel::error<<"Frontend not started.";
+        //     frontend.logger->flush();
+        //     throw uninited_exception();
+        // }
+        // virtual void newIteration() override {        
+        //     (*frontend.logger)<<LogLevel::error<<"Frontend not started.";
+        //     frontend.logger->flush();
+        //     throw uninited_exception();
+        // }
 
         virtual void updateSchedule() override {
             (*frontend.logger)<<LogLevel::error<<"Updating schedule for not-started frontend.";
@@ -358,10 +354,6 @@ protected:
         virtual bool isStarted() const noexcept override { return true; }
 
         virtual MemorySession& getSession() override { return frontend.session; }
-
-        virtual int getIteration() const override { return frontend.executor.getIteration(); }
-        virtual void setIteration(int iteration) override { return frontend.executor.setIteration(iteration); }
-        virtual void increaseIteration() override { return frontend.executor.increaseIteration(); }
         
         virtual void updateSchedule() override {
             auto&& event_set = frontend.backend_handle->getScheduleEvents();
@@ -425,7 +417,7 @@ public:
         inited_impl(*this),
         started_impl(*this),
         context(_context), 
-        session(_context, memory_status),
+        session(_context, executor, memory_status),
         executor(_context, memory_status) {
         // Set backend
         backend_handle = make_backend_handle(_context);
@@ -508,19 +500,19 @@ public:
      */
     inline MemorySession& getSession() { return impl->getSession(); }
 
-    /**
-     * @brief Get current iteration count.
-     * @return Current iteration count.
-     */
-    inline int getIteration() { return impl->getIteration(); }
-    /**
-     * @brief Set current iteration count.
-     */
-    inline void setIteration(int iteration) { impl->setIteration(iteration); }
-    /**
-     * @brief Increase iteration count.
-     */
-    inline void increaseIteration() { impl->increaseIteration(); }
+    // /**
+    //  * @brief Get current iteration count.
+    //  * @return Current iteration count.
+    //  */
+    // inline int getIteration() { return impl->getIteration(); }
+    // /**
+    //  * @brief Set current iteration count.
+    //  */
+    // inline void setIteration(int iteration) { impl->setIteration(iteration); }
+    // /**
+    //  * @brief Increase iteration count.
+    //  */
+    // inline void newIteration() { impl->newIteration(); }
 
     /**
      * @brief Update current memory swapping schedule

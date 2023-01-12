@@ -2,14 +2,17 @@
 
 #include <dlfcn.h>
 
+#include "includes/context.hpp"
+
 namespace mori {
 namespace utils {
 
-template <typename T, typename O>
-void* load_dylib(const std::string& dylib, const std::string& path, const std::string& entry, std::unique_ptr<O>& ptr) {
+template <typename T>
+void* load_dylib(const std::string& dylib, const std::string& path, const std::string& entry, std::unique_ptr<T>& ptr) {
+    typedef int(*EntryType)(std::unique_ptr<T>&);
     void* hInst = dlopen(path.c_str(), RTLD_LAZY);
     if (!hInst) throw dynamic_library_exception("Failed to open dynamic library: " + dylib);
-    T f = (T)dlsym(hInst, entry.c_str());
+    EntryType f = (EntryType)dlsym(hInst, entry.c_str());
 
     int ret;
     if (f) ret = f(ptr);
@@ -20,11 +23,12 @@ void* load_dylib(const std::string& dylib, const std::string& path, const std::s
     return hInst;
 }
 
-template <typename T, typename O, typename C>
-void* load_dylib(const std::string& dylib, const std::string& path, const std::string& entry, std::unique_ptr<O>& ptr, C context) {
+template <typename T>
+void* load_dylib(const std::string& dylib, const std::string& path, const std::string& entry, std::unique_ptr<T>& ptr, const Context::View& context) {
+    typedef int(*EntryType)(std::unique_ptr<T>&, const Context::View&);
     void* hInst = dlopen(path.c_str(), RTLD_LAZY);
     if (!hInst) throw dynamic_library_exception("Failed to open dynamic library: " + dylib);
-    T f = (T)dlsym(hInst, entry.c_str());
+    EntryType f = (EntryType)dlsym(hInst, entry.c_str());
 
     int ret;
     if (f) ret = f(ptr, context);

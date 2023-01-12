@@ -1,20 +1,30 @@
 #pragma once
 
 #include "frontend/backend_handle.hpp"
+#include "frontend/memory_schedule_executor.hpp"
 #include "frontend/memory_operation_executor.hpp"
 #include "frontend/callbacks.hpp"
 #include "includes/memory_status.hpp"
 #include "includes/memory_event.hpp"
+#include "includes/application_stage.hpp"
 
 namespace mori {
 
 struct MemoryRequest final {
-protected:
+private:
+    friend class MemorySession;
+
+private:
+    std::string op;
+
     status::MemoryStatus& status;
-    MemoryOperationExecutor& executor;
+    MemoryScheduleExecutor& sch_executor;
+    MemoryOperationExecutor& op_executor;
     Callbacks& callbacks;
     std::weak_ptr<BackendHandle> backend_handle;
     Logger* logger;
+
+    ApplicationStage stage;
 
     std::unordered_map<std::string, status::TensorPres> requested_tensors;
     std::atomic<bool> waiting = true;
@@ -29,17 +39,14 @@ protected:
         return requested_tensors.find(tensor) != requested_tensors.end();
     }
 
-public:
-    MemoryRequest(status::MemoryStatus& _status, MemoryOperationExecutor& _executor, Callbacks& _callbacks, std::weak_ptr<BackendHandle>& _backend_handle, Logger* _logger): status(_status), executor(_executor), callbacks(_callbacks), backend_handle(_backend_handle), logger(_logger) {}
+    MemoryRequest(const std::string& _op, status::MemoryStatus& _status, MemoryScheduleExecutor& _sch_executor, MemoryOperationExecutor& _op_executor, Callbacks& _callbacks, std::weak_ptr<BackendHandle>& _backend_handle, Logger* _logger, ApplicationStage _stage): op(_op), status(_status), sch_executor(_sch_executor), op_executor(_op_executor), callbacks(_callbacks), backend_handle(_backend_handle), logger(_logger), stage(_stage) {}
 
+public:
     MemoryRequest(const MemoryRequest&) = delete;
-    MemoryRequest(MemoryRequest&& _request): status(_request.status), executor(_request.executor), callbacks(_request.callbacks), logger(_request.logger) {
+    MemoryRequest(MemoryRequest&& _request): status(_request.status), sch_executor(_request.sch_executor), op_executor(_request.op_executor), callbacks(_request.callbacks), logger(_request.logger) {
         requested_tensors = std::move(_request.requested_tensors);
         backend_handle = std::move(_request.backend_handle);
     }
-
-    MemoryRequest& operator=(const MemoryRequest&) = delete;
-    MemoryRequest& operator=(MemoryRequest&& _request) = delete;
 
     void waitTensor(const std::string& tensor) {
         // If the tensor waited, it would have been locked on device memory.
@@ -47,20 +54,16 @@ public:
 
         auto p = requested_tensors.emplace(tensor, status.referenceTensor(tensor));
         status::TensorPres& pres = p.first->second;
-        switch (pres.getStatus()) {
-            case status::MemoryStatusType::none:
-                throw status_exception("Accessing non-exist data.");
-            case status::MemoryStatusType::host:
-                executor.swapIn(pres);
-                if (callbacks.count(CallbackStage::postSwapIn)) callbacks.at(CallbackStage::postSwapIn)(tensor, pres.getDevicePointer(0));
-                // Swap in = copy in + host freed.
-                (*logger) << LogLevel::debug << "Tensor: " << tensor << " swapped in. (Memory access)";
-                logger->flush();
-                backend_handle.lock()->submitEvent(events::MemoryEvent(tensor, events::MemoryEventType::swapin));
-                break;
-            default:
-                break;
-        }
+        // Do not swap in tensor that already on device.
+        if (pres.getSize() == pres.getRemainingSize()) return;
+        
+        op_executor.swapIn(pres, pres.getSize() - pres.getRemainingSize());
+        
+        if (callbacks.count(CallbackStage::postSwapIn)) callbacks.at(CallbackStage::postSwapIn)(tensor, pres.getSection(0).device_address);
+        
+        (*logger) << LogLevel::debug << "Tensor: " << tensor << " swapped in. (Memory access)";
+        logger->flush();
+        backend_handle.lock()->submitEvent(events::MemoryEvent(op, tensor, pres.getSize() - pres.getRemainingSize(), events::MemoryEventType::swapin, stage));
     }
 
     // /**
@@ -90,7 +93,7 @@ public:
         pres.setAssigned();
 
         // emit memory event
-        backend_handle.lock()->submitEvent(events::MemoryEvent(tensor, events::MemoryEventType::write));
+        backend_handle.lock()->submitEvent(events::MemoryEvent(op, tensor, pres.getSize() ,events::MemoryEventType::write, stage));
     }
 
     /**
@@ -108,7 +111,7 @@ public:
         pres.setAcquired();
 
         // emit memory event
-        backend_handle.lock()->submitEvent(events::MemoryEvent(tensor, events::MemoryEventType::read));
+        backend_handle.lock()->submitEvent(events::MemoryEvent(op, tensor, pres.getSize(), events::MemoryEventType::read, stage));
     }
 
     /**
@@ -125,12 +128,14 @@ public:
         pres.setAccessed();
 
         // emit memory event
-        backend_handle.lock()->submitEvent(events::MemoryEvent(tensor, events::MemoryEventType::access));
+        backend_handle.lock()->submitEvent(events::MemoryEvent(op, tensor, pres.getSize(), events::MemoryEventType::access, stage));
     }
 
     void release() {
         for (auto &x : requested_tensors)
             x.second.release();
+
+        sch_executor.setOperatorFinished(op);
         waiting = false;
     }
 
@@ -153,22 +158,23 @@ private:
 private:
     Context context;
 
-    std::atomic<int> step;
-
     std::weak_ptr<BackendHandle> backend_handle;
 
     status::MemoryStatus& status;
-    MemoryOperationExecutor executor;
+    MemoryScheduleExecutor& sch_executor;
+    MemoryOperationExecutor op_executor;
 
     Callbacks callbacks;
 
     Logger* logger;
 
+    ApplicationStage stage = ApplicationStage::forward;
+
     void setBackendHandle(const std::weak_ptr<BackendHandle>& _backend_handle) {
         backend_handle = _backend_handle;
     }
     void setMemoryManager(MemoryManager* _memory_manager) {
-        executor.setMemoryManager(_memory_manager);
+        op_executor.setMemoryManager(_memory_manager);
     }
     void setLogger(Logger* _logger) {
         logger = _logger;
@@ -178,14 +184,47 @@ private:
     }
 
 public:
-    MemorySession(const Context& _context, status::MemoryStatus& _status): context(_context), status(_status) {}
+    MemorySession(const Context& _context, MemoryScheduleExecutor& _executor, status::MemoryStatus& _status): context(_context), sch_executor(_executor), status(_status) {}
+
+    int getIteration() const { return 0; }
+    
+    void setIteration(int iteration) {
+        sch_executor.setIteration(iteration);
+        backend_handle.lock()->setIteration(iteration);
+    }
+    
+    /**
+     * @brief Set the new iteration is ready.
+     * @note  This method will synchronize with the schedule executor, to assure all the swappings are finished.
+    */
+    void newIteration() {
+        // Reset stage
+        stage = ApplicationStage::forward;
+
+        sch_executor.newIteration();
+        backend_handle.lock()->newIteration();
+    }
+
+    /**
+     * @brief Set the forward progagation, or half of the iteration is executed.
+     * @note  This method will synchronize with the schedule executor, to assure all the swap-outs are finished.
+    */
+    void halfIteration() {
+        // Reverse stage
+        if (stage == ApplicationStage::forward) stage = ApplicationStage::backward;
+        else stage = ApplicationStage::forward;
+
+        sch_executor.halfIteration();
+        // backend_handle.lock()->
+    }
 
     /**
      * @brief Set the memory data is allocated.
+     * @param op operator name
      * @param tensor tensor name
      * @param address tensor address
      */
-    void setMemoryDataAllocated(const std::string& tensor, void* address) {
+    void setMemoryDataAllocated(const std::string& op, const std::string& tensor, void* address) {
         if (address == nullptr) throw memory_device_insufficience();
         if (!status.isTensorRegistered(tensor)) throw status_exception("Tensor not registered.");
 
@@ -193,20 +232,18 @@ public:
         pres.setAllocated(address);
 
         // emit memory event
-        backend_handle.lock()->submitEvent(events::MemoryEvent(tensor, events::MemoryEventType::allocate));
+        backend_handle.lock()->submitEvent(events::MemoryEvent(op, tensor, pres.getSize(), events::MemoryEventType::allocate, stage));
     }
 
-    inline int getIteration() const { return 0; }
-    inline void setIteration(int _iteration) {}
-    inline void increaseIteration() {}
+    void setMemoryDataAllocated(const std::string& tensor, void* address) { setMemoryDataAllocated("", tensor, address); }
 
     /**
      * @brief  Assure the data of a operator is moved to the device memory before the operator is launched.
      * @return MemoryRequest object
      */
-    MemoryRequest createRequest() {
+    MemoryRequest createRequest(const std::string& op = "") {
         // if (!status.isOperatorRegistered(op)) throw status_exception("Operator not registered.");
-        MemoryRequest re(status, executor, callbacks, backend_handle, logger);
+        MemoryRequest re(op, status, sch_executor, op_executor, callbacks, backend_handle, logger, stage);
         return re;
     }
 
@@ -217,37 +254,35 @@ public:
      */
     void waitMemory(size_t size) {
         size_t released_size = 0;
-        std::deque<std::string> ops;
+
         for (auto &op_name : status.getExecutionOrder()) {
             status::OperatorPres op_pres = status.referenceOperator(op_name);
             // Forward propagation and backward propagation share the same set of operators.
             if (op_pres.isBackwardPropagation()) continue;
             (*logger) << LogLevel::debug << "Considering " << op_name;
             logger->flush();
+
             for (auto &tensor_name : op_pres.getTensors()) { 
                 status::TensorPres tensor_pres = status.referenceTensor(tensor_name);
+                // Do not swap out persistant tensors.
                 if (tensor_pres.isPersistant()) continue;
-                switch (tensor_pres.getStatus()) {
-                    case status::MemoryStatusType::coexist:
-                        executor.freeDevice(tensor_pres);
-                        break;
-                    case status::MemoryStatusType::device:
-                        executor.swapOut(tensor_pres);
-                        break;
-                    case status::MemoryStatusType::host:
-                    case status::MemoryStatusType::empty:
-                    default:
-                        continue;
-                }
-                if (callbacks.count(CallbackStage::postSwapOut)) callbacks.at(CallbackStage::postSwapOut)(tensor_name, tensor_pres.getHostPointer(0));
+                // Do not swap out tensors that already host-only.
+                if (tensor_pres.getRemainingSize() == 0) continue;
+                int releasing_size = 0;
+                if (tensor_pres.getRemainingSize() + released_size <= size) releasing_size = tensor_pres.getRemainingSize();
+                else releasing_size = size - released_size;
+                op_executor.swapOut(tensor_pres, releasing_size);
+
+                if (callbacks.count(CallbackStage::postSwapOut)) callbacks.at(CallbackStage::postSwapOut)(tensor_name, tensor_pres.getSection(0).host_address);
                 (*logger) << LogLevel::debug << "Releasing " << tensor_pres.getName();
                 logger->flush();
 
-                backend_handle.lock()->submitEvent(events::MemoryEvent(tensor_name, events::MemoryEventType::swapout));
+                backend_handle.lock()->submitEvent(events::MemoryEvent(op_name, tensor_name, releasing_size, events::MemoryEventType::swapout, stage));
 
-                released_size += tensor_pres.getSize();
+                released_size += releasing_size;
                 if (released_size >= size) break;
             }
+            if (released_size >= size) break;
         }
 
         if (released_size >= size) {
@@ -262,17 +297,20 @@ public:
 
     /**
      * @brief Set the memory data is freed.
+     * @param op operator name
      * @param tensor tensor name
      */
-    void setMemoryDataFreed(const std::string& tensor) {
+    void setMemoryDataFreed(const std::string& op, const std::string& tensor) {
         if (!status.isTensorRegistered(tensor)) throw status_exception("Operator or tensor not registered.");
 
         status::TensorPres pres = status.referenceTensor(tensor);
         pres.setFreed();
 
         // emit memory event
-        backend_handle.lock()->submitEvent(events::MemoryEvent(tensor, events::MemoryEventType::free));
+        backend_handle.lock()->submitEvent(events::MemoryEvent(op, tensor, pres.getSize(), events::MemoryEventType::free, stage));
     }
+
+    void setMemoryDataFreed(const std::string& tensor) { setMemoryDataFreed("", tensor); }
 
     ~MemorySession() = default;
 };  // struct MemorySession

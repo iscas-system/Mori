@@ -21,17 +21,29 @@ enum MemoryStatusType {
     none, empty, device, host, coexist, swapin, swapout
 };  // enum MemoryDataStatusType
 
+struct Tensor;
+
 /**
- * MemoryStatus
  * Describe memory data section on the specific computing acclerating device. 
  * A tensor consists of a series of memory data sections.
  */
-struct MemorySection {
+struct MemorySection final {
+    friend struct Tensor;
+
     void* host_address = nullptr;
     void* device_address = nullptr;
     MemoryStatusType status = none;
 
     size_t size = 0;
+
+    MemorySection() = default;
+    MemorySection(void* _host_address, void* _device_address, MemoryStatusType _status, size_t _size): host_address(_host_address), device_address(_device_address), status(_status), size(_size) {}
+    MemorySection(const MemorySection&) = default;
+    MemorySection(MemorySection&&) = default;
+    MemorySection& operator=(const MemorySection&) = default;
+    MemorySection& operator=(MemorySection&&) = default;
+
+    ~MemorySection() = default;
 };
 
 struct TensorPres;
@@ -51,16 +63,75 @@ private:
     // Key is the offset of the section, value is the corresponding memory status.
     // When the tensor is fulfilly on device, the sections should be continuous.
     std::map<size_t, MemorySection> sections;
-    // Quick reference to current memory status, which is aggregated from section statuses.
-    MemoryStatusType status = none;
 
+    // Tensor size
     size_t size = 0;
+    // Remaining tensor size in memory
+    size_t remaining_size = 0;
     MemoryDataType type = all;
 
     // Indicating if the tensor should be considered in swapping.
     bool persistant = false;
 
     std::shared_mutex m;
+
+protected:
+    void splitSection(int offset, size_t size) {
+        MemorySection& memory_section = sections.at(offset);
+
+        if (memory_section.size < size) {
+            throw memory_section_invalid("Sectioning size larger than section size.");
+        }
+        if (memory_section.size == size) return;
+
+        MemorySection new_section;
+        if (memory_section.host_address   != nullptr) new_section.host_address   = (uint8_t*)memory_section.host_address   + size;
+        if (memory_section.device_address != nullptr) new_section.device_address = (uint8_t*)memory_section.device_address + size;
+        new_section.status         = memory_section.status;
+        new_section.size           = memory_section.size - size;
+
+        memory_section.size = size;
+
+        sections.emplace(offset + size, new_section);
+    }
+
+    void mergeSection(int offset = 0) {
+        auto pb = sections.find(offset);
+        if (pb == sections.end()) throw memory_section_invalid("Invalid section offset.");
+        MemorySection& memory_section = pb->second;
+        auto pe = ++pb;
+
+        while (pe != sections.end()) {
+            // If stop merging.
+            if (pe->second.status != memory_section.status) break;
+
+            switch (memory_section.status) {
+                case MemoryStatusType::none:
+                    // Both sections should not be allocated.
+                    assert(memory_section.device_address == nullptr && pe->second.device_address == nullptr);
+                    assert(memory_section.host_address   == nullptr && pe->second.host_address   == nullptr);
+                    break;
+                case MemoryStatusType::empty:
+                    // Both sections should be allocated.
+                    assert(memory_section.device_address != nullptr && pe->second.device_address != nullptr);
+                    assert(memory_section.host_address   != nullptr || pe->second.host_address   != nullptr);
+                    break;
+                default:
+                    assert((uint8_t*)memory_section.device_address + memory_section.size == pe->second.device_address);
+                    break;
+            }
+            
+            // For memory sections on host (host or coexist), the host memory should be considered.
+            if (memory_section.status == MemoryStatusType::host || memory_section.status == MemoryStatusType::coexist)
+                if ((uint8_t*)memory_section.host_address + memory_section.size != pe->second.host_address)
+                    break;
+
+            memory_section.size += pe->second.size;
+            ++pe;
+        }
+
+        sections.erase(pb, pe);
+    }
 
 public:
     Tensor() {
@@ -69,25 +140,25 @@ public:
     Tensor(const std::string& _name): Tensor() {
         name = _name;
     }
-    Tensor(const std::string& _name, size_t _size): name(_name), size(_size) {
+    Tensor(const std::string& _name, size_t _size): name(_name), size(_size), remaining_size(_size) {
         sections.emplace(0, MemorySection{nullptr, nullptr, none, _size});
     }
-    Tensor(const std::string& _name, size_t _size, MemoryDataType _type): name(_name), size(_size), type(_type) {
+    Tensor(const std::string& _name, size_t _size, MemoryDataType _type): name(_name), size(_size), remaining_size(_size), type(_type) {
         sections.emplace(0, MemorySection{nullptr, nullptr, none, _size});
     }
     Tensor(const Tensor& _status) {
         name = _status.name;
         sections = _status.sections;
-        status = _status.status;
         size = _status.size;
+        remaining_size = _status.size;
         type = _status.type;
         persistant = _status.persistant;
     }
     Tensor(Tensor&& _status) {
         name = std::move(_status.name);
         sections = std::move(_status.sections);
-        status = _status.status;
         size = _status.size;
+        remaining_size = _status.remaining_size;
         type = _status.type;
         persistant = _status.persistant;
     }
@@ -95,8 +166,8 @@ public:
     Tensor& operator=(const Tensor& _status) {
         name = _status.name;
         sections = _status.sections;
-        status = _status.status;
         size = _status.size;
+        remaining_size = _status.remaining_size;
         type = _status.type;
         persistant = _status.persistant;
         return *this;
@@ -104,8 +175,8 @@ public:
     Tensor& operator=(Tensor&& _status) {
         name = std::move(_status.name);
         sections = std::move(_status.sections);
-        status = _status.status;
         size = _status.size;
+        remaining_size = _status.remaining_size;
         type = _status.type;
         persistant = _status.persistant;
         return *this;
@@ -115,120 +186,138 @@ public:
     inline void setType(MemoryDataType _type) { type = _type; }
     inline void setPersistant(bool _persistant) { persistant = _persistant; }
 
-    inline std::string getName() const noexcept { return name; }
-    inline size_t getSize() const noexcept { return sections.at(0).size; }
-    inline MemoryStatusType getStatus() const noexcept { return sections.at(0).status; }
-    inline MemoryDataType getType() const noexcept { return type; }
-    inline bool isPersistant() const noexcept { return persistant; }
+    inline std::string      getName()          const noexcept { return name; }
+    inline size_t           getSize()          const noexcept { return size; }
+    inline size_t           getRemainingSize() const noexcept { return remaining_size; }
+    inline MemoryDataType   getType()          const noexcept { return type; }
+    inline bool             isPersistant()     const noexcept { return persistant; }
 
-    inline void*  getDevicePointer(int section) { return sections[section].device_address; }
-    inline void*  getHostPointer(int section)   { return sections[section].host_address; }
-    inline size_t getSectionSize(int section)   { return sections[section].size; }
+    inline MemorySection& getSection(size_t offset) { return sections.at(offset); }
+    inline int getSectionCount() const noexcept { return sections.size(); }
+    
+    std::vector<size_t> getSections() const {
+        std::vector<size_t> re;
+        for (auto &x : sections) re.push_back(x.first);
+        return re;
+    }
+
+    inline bool isSectionExist(size_t offset) const noexcept { return sections.find(offset) != sections.end(); }
 
     void acquire() { m.lock(); }
 
     void setAllocated(void* device_address) {
-        // Since the allocation takes place in the beginning of the DL training procedure, there should be only one memory section.
+        // Since the allocation takes place in the beginning of the application procedure, there should be only one memory section.
         assert(sections.size() == 1);
+        assert(sections[0].status == MemoryStatusType::none);
         sections[0].device_address = device_address;
         sections[0].status = MemoryStatusType::empty;
+        remaining_size = size;
     }
     void setAssigned() {
-        switch(sections[0].status) {
-            case empty:
-            case coexist:
-                sections[0].status = device;
-            case device:
-                break;
-            default:
-                throw status_exception("Accessing data not on device.");
+        for (auto &x : sections) {
+            switch(x.second.status) {
+                case empty:
+                case coexist:
+                    x.second.status = MemoryStatusType::device;
+                case device:
+                    break;
+                default:
+                    throw status_exception("Accessing data not on device.");
+            }
         }
     }
     void setAcquired() {
-        switch(sections[0].status) {
-            case coexist:
-            case device:
-            case empty:
-                break;
-            default:
-                throw status_exception("Acquiring data not on device.");
+        for (auto &x : sections) {
+            switch(x.second.status) {
+                case coexist:
+                case device:
+                case empty:
+                    break;
+                default:
+                    throw status_exception("Acquiring data not on device.");
+            }
         }
     }
     void setAccessed() {
         setAssigned();
     }
-    void setCopiedOut(void* host_address) {
-        sections[0].host_address = host_address;
-        switch(sections[0].status) {
+    void setCopiedOut(size_t offset, size_t size, void* host_address) {
+        MemorySection& memory_section = sections.at(offset);
+        if (memory_section.size > size) splitSection(offset, size);
+        memory_section.host_address = host_address;
+        switch(memory_section.status) {
             case coexist:
             case empty:
                 break;
             case device:
-                sections[0].status = MemoryStatusType::coexist;
+                memory_section.status = MemoryStatusType::coexist;
                 break;
             default:
                 throw status_exception("No data on device while copying out memory data.");
         }
     }
-    void setCopiedIn(void* device_address) {
-        sections[0].device_address = device_address;
-        switch(sections[0].status) {
+    void setCopiedIn(size_t offset, size_t size, void* device_address) {
+        MemorySection& memory_section = sections.at(offset);
+        if (memory_section.size != size) throw memory_section_invalid("Invalid memory section coping in size.");
+        memory_section.device_address = device_address;
+        switch(memory_section.status) {
             case host:
-                sections[0].status = MemoryStatusType::coexist;
+                memory_section.status = MemoryStatusType::coexist;
             case coexist:
                 break;
             default:
                 throw status_exception("No data on host while copying in memory data.");
                 break;
         }
+        remaining_size += size;
     }
-    void setHostFreed() {
-        sections[0].host_address = nullptr;
-        switch (sections[0].status) {
+    void setHostFreed(size_t offset) {
+        MemorySection& memory_section = sections.at(offset);
+        switch (memory_section.status) {
             case coexist:
-                sections[0].status = device;
+                memory_section.status = device;
                 break;
             case host:
-                sections[0].status = none;
+                memory_section.status = none;
                 break;
             default:
                 throw status_exception("No data on host while freeing host memory.");
         }
+        mergeSection();
     }
-    void setDeviceFreed() {
-        sections[0].device_address = nullptr;
-        switch (sections[0].status) {
+    void setDeviceFreed(size_t offset) {
+        MemorySection& memory_section = sections.at(offset);
+        switch (memory_section.status) {
             case coexist:
-                sections[0].status = host;
+                memory_section.status = host;
                 break;
             case empty:
             case device:
-                sections[0].status = none;
+                memory_section.status = none;
                 break;
             default:
                 throw status_exception("No data on host while freeing host memory.");
         }
+
+        remaining_size -= memory_section.size;
     }
-    void setFreed() {
-        sections[0].device_address = nullptr;
-        switch (sections[0].status) {
+    void setFreed(size_t offset) {
+        MemorySection& memory_section = sections.at(offset);
+        switch (memory_section.status) {
             case coexist:
             case empty:
             case device:
+                remaining_size -= memory_section.size;
             case host:
-                sections[0].status = none;
+                memory_section.status = none;
                 break;
             default:
                 throw status_exception("No data on host and device while freeing memory.");
         }
+        mergeSection();
     }
 
     void release() { m.unlock(); }
-
-    void resize(size_t _size) {
-        sections.clear();
-        sections.emplace(0, MemorySection{nullptr, nullptr, none, _size});
-    }
 
     ~Tensor() = default;
 
@@ -361,21 +450,27 @@ struct TensorPres final {
     inline void setAcquired() { status.setAcquired(); }
     inline void setAccessed() { status.setAccessed(); }
 
-    inline void setCopiedOut(void* host_address)  { status.setCopiedOut(host_address); }
-    inline void setCopiedIn(void* device_address) { status.setCopiedIn(device_address); }
-    inline void setHostFreed()   { status.setHostFreed(); }
-    inline void setDeviceFreed() { status.setDeviceFreed(); }
-    inline void setFreed()       { status.setFreed(); }
+    inline void setCopiedOut(size_t offset, size_t size, void* host_address) { status.setCopiedOut(offset, size, host_address); }
+    inline void setCopiedOut(void* host_address) {status.setCopiedOut(0, status.getSize(), host_address); }
+    inline void setCopiedIn(size_t offset, size_t size, void* device_address) { status.setCopiedIn(offset, size, device_address); }
+    inline void setCopiedIn(void* device_address) { status.setCopiedIn(0, status.getSize(), device_address); }
+    inline void setHostFreed(size_t offset = 0)   { status.setHostFreed(offset); }
+    inline void setDeviceFreed(size_t offset = 0) { status.setDeviceFreed(offset); }
+    inline void setFreed(size_t offset = 0)       { status.setFreed(offset); }
 
-    inline std::string      getName()      const noexcept { return status.getName(); }
-    inline size_t           getSize()      const noexcept { return status.getSize(); }
-    inline MemoryStatusType getStatus()    const noexcept { return status.getStatus(); }
-    inline MemoryDataType   getType()      const noexcept { return status.getType(); }
-    inline bool             isPersistant() const noexcept { return status.isPersistant(); }
+    inline std::string      getName()          const noexcept { return status.getName(); }
+    inline size_t           getSize()          const noexcept { return status.getSize(); }
+    inline size_t           getRemainingSize() const noexcept { return status.getRemainingSize(); }
+    inline MemoryDataType   getType()          const noexcept { return status.getType(); }
+    inline bool             isPersistant()     const noexcept { return status.isPersistant(); }
 
-    inline void*  getDevicePointer(int section) { return status.getDevicePointer(section); }
-    inline void*  getHostPointer(int section)   { return status.getHostPointer(section); }
-    inline size_t getSectionSize(int section)   { return status.getSectionSize(section); }
+    inline const MemorySection& getSection(size_t offset) const { return status.getSection(offset); }
+    inline int getSectionCount() const noexcept { return status.getSectionCount(); }
+    std::vector<size_t> getSections() const { return status.getSections(); }
+
+    inline bool isSectionExist(size_t offset) const noexcept { return status.isSectionExist(offset); }
+
+    inline Tensor& get() noexcept { return status; }
 
     inline void release() { l.unlock(); }
 
@@ -400,6 +495,8 @@ struct OperatorPres final {
     inline std::unordered_set<std::string> getTensors() const noexcept { return status.getTensors(); }
 
     inline bool isBackwardPropagation() const noexcept { return status.isBackwardPropagation(); }
+
+    inline Operator& get() noexcept { return status; }
 };  // struct OperatorPres
 
 /**
@@ -506,6 +603,7 @@ public:
     inline std::string getEntry() const noexcept { return operator_entry; }
 
     inline std::vector<std::string> getExecutionOrder() const noexcept { return execution_order; }
+
     template<typename T>
     inline void setExecutionOrder(const T& _execution_order) { 
         std::vector<std::string> vect(begin(_execution_order), end(_execution_order));
@@ -528,9 +626,9 @@ public:
      * @param op operator name
      * @return if the operator is registered
      */
-    // bool isOperatorRegistered(const std::string& op) const {
-    //     return operator_statuses.find(op) != operator_statuses.end();
-    // }
+    bool isOperatorRegistered(const std::string& op) const {
+        return operator_statuses.find(op) != operator_statuses.end();
+    }
 
     /**
      * reference
@@ -609,7 +707,6 @@ static std::string get_tensor_type_str(MemoryDataType type) {
 }
 
 }   // namespace util
-
 }   // namespace status
 
 using TensorPres   = status::TensorPres;

@@ -16,8 +16,12 @@ struct Backend {
 
     virtual void start() {}
 
+    virtual void setIteration(int _iteration) = 0;
+    virtual void newIteration() = 0;
+    virtual void halfIteration() = 0;
+
     virtual void submitEvent(const events::MemoryEvent& event) = 0;
-    virtual std::vector<events::ScheduleEvent> getScheduleEvents() = 0;
+    virtual events::ScheduleEvents getScheduleEvents() = 0;
 
     virtual void stop() {}
 

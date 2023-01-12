@@ -5,133 +5,111 @@
 #include <atomic>
 #include <mutex>
 
+#include "includes/context.hpp"
 #include "includes/backend.hpp"
+#include "includes/memory_status.hpp"
 #include "includes/memory_event.hpp"
 #include "includes/memory_schedule_event.hpp"
 #include "includes/exceptions.hpp"
+#include "backend/events.hpp"
 
 namespace mori {
 
 struct MemoryScheduler {
-    Backend* backend;
+protected:
+    const Context& context;
+    status::MemoryStatus& status;
+    events::Events& events;
 
-    bool inited = false;
+    events::ScheduleEvents schedule_events;
 
-    MemoryScheduler() {}
-
-    void setBackend(Backend* _backend) {
-        if (inited) return;
-        backend = _backend;
-    }
-
-    virtual void init() {
-        if (inited) throw inited_exception();
-        inited = true;
-    }
+public:
+    MemoryScheduler(const Context& _context, status::MemoryStatus& _status, events::Events& _events): context(_context), status(_status), events(_events) {}
 
     /**
-     * Inform that if the scheduler activelly schedule the memory swapping.
-     * Active scheduler realtime automatically triggers memory swapping, while proactive scheduler only responds to memory events.
-     * @return if the scheduler is an active scheduler.
-     */
-    virtual bool isActiveScheduler() {
-        return false;
-    }
-
-    virtual void schedule() {
-        if (false) {
-            // int curr_sched_iteration = 0;
-            {
-            }
-
-            // Do scheduling here.
-        }
-    }
+     * Action when the scheduling is triggered.
+    */
+    virtual void onSchedule() = 0;
 
     /**
-     * onMemoryEvent
      * Action when new memory event is submitted.
+     * @param event The submitted event
      */
-    virtual void onMemoryEvent(const events::MemoryEvent& event) {
-        switch(event.type) {
-            case events::MemoryEventType::allocate:
-                // Proactive memory scheduler only need to schedule when memory is insufficient.
-                break;
-            default:
-                break;
-        }
-    }
+    virtual void onMemoryEvent(const events::MemoryEvent& event) = 0;
 
-    virtual void onIncreaseIteration() {
-    }
+    /**
+     * Action when an iteration starts.
+    */
+    virtual void onNewIteration() = 0;
     
-    virtual std::vector<events::ScheduleEvent> getScheduleEvents() {
-        return std::vector<events::ScheduleEvent>();
-    }
+    inline events::ScheduleEvents getScheduleEvents() { return schedule_events; }
 
-    virtual void submitEvent(events::MemoryEvent event) {
-        if (!inited) throw uninited_exception();
-        onMemoryEvent(event);
-    }
+    void submitEvent(events::MemoryEvent event) { onMemoryEvent(event); }
 
-    virtual void increaseIteration() {
-        if (!inited) throw uninited_exception();
-        onIncreaseIteration();
-    }
+    void newIteration() { onNewIteration(); }
 
-    virtual void terminate() {
-        if (!inited) throw uninited_exception();
-        inited = false;
-    }
-
-    virtual ~MemoryScheduler() {
-        if (inited) terminate();
-        backend = nullptr;
-    }
+    virtual ~MemoryScheduler() = default;
     
 };  // struct MemoryScheduler
 
 struct FIFOMemoryScheduler : public MemoryScheduler {
-    virtual void init() {MemoryScheduler::init();}
+    bool decided = false;
 
-    virtual void schedule() {}
+    FIFOMemoryScheduler(const Context& _context, status::MemoryStatus& _status, events::Events& _events): MemoryScheduler(_context, _status, _events) {}
 
-    virtual void terminate() {}
+    virtual void onSchedule() override {
+
+    }
+    virtual void onMemoryEvent(const events::MemoryEvent& event) override {}
+    virtual void onNewIteration() override {
+        if (events.getIteration() == 1) return;
+        auto iter_1_res = events.select().where([](const events::EventSet::item& item) {
+            return item.first == 1 && item.second.stage == ApplicationStage::forward;
+        }).get();
+        auto swapout_res = iter_1_res.select().where([](const events::EventSet::item& item) {
+            return item.second.type == events::MemoryEventType::swapout;
+        }).get();
+
+        if (!decided) {
+            for (auto &x : swapout_res.ref()) {
+                // Create schedule event here;
+                std::string target_tensor = x->second.tensor;
+                // Get the last access of this tensor
+                auto target_tensor_res = iter_1_res.select().where([x](const events::EventSet::item& item) {
+                    return item.second.tensor == x->second.tensor;
+                }).get();
+
+                auto op = (*--target_tensor_res.ref().end())->second.op;
+                schedule_events.forward_schedule_events.execution.emplace_back("", x->second.tensor, x->second.size, events::ScheduleEventType::swapout, "o1");
+            }
+
+            decided = true;
+        }
+    }
 
     virtual ~FIFOMemoryScheduler() = default;
 
 };  // struct FIFOMemoryScheduler
 
 struct DependencyAwareMemoryScheduler: public MemoryScheduler {
-    virtual void init() {MemoryScheduler::init();}
+    DependencyAwareMemoryScheduler(const Context& _context, status::MemoryStatus& _status, events::Events& _events): MemoryScheduler(_context, _status, _events) {}
 
-    virtual void schedule() {}
-
-    virtual void terminate() {}
+    virtual void onSchedule() override {}
+    virtual void onMemoryEvent(const events::MemoryEvent& event) override {}
+    virtual void onNewIteration() override {}
 
     virtual ~DependencyAwareMemoryScheduler() = default;
 
 };  // struct DependencyAwareMemoryScheduler
 
 struct MaximumSizePriorityMemoryScheduler: public MemoryScheduler {
-    virtual void init() {MemoryScheduler::init();}
+    MaximumSizePriorityMemoryScheduler(const Context& _context, status::MemoryStatus& _status, events::Events& _events): MemoryScheduler(_context, _status, _events) {}
 
-    virtual void schedule() {}
-
-    virtual void terminate() {}
+    virtual void onSchedule() override {}
+    virtual void onMemoryEvent(const events::MemoryEvent& event) override {}
+    virtual void onNewIteration() override {}
 
     virtual ~MaximumSizePriorityMemoryScheduler() = default;
 };  // struct MaximumSizePriorityMemoryScheduler
-
-struct RWAwareMemoryScheduler: public MemoryScheduler {
-    virtual void init() {MemoryScheduler::init();}
-
-    virtual void schedule() {}
-
-    virtual void terminate() {}
-
-    virtual ~RWAwareMemoryScheduler() = default;
-
-};  // struct RWAwareMemoryScheduler
 
 }   // namespace mori
