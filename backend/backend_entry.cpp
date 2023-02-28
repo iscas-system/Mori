@@ -11,9 +11,9 @@
 
 #include <dlfcn.h>
 
-#include "backend/memory_scheduler.hpp"
 #include "backend/events.hpp"
 #include "backend/basic_backend.hpp"
+#include "backend/schedulers/memory_scheduler.hpp"
 #include "includes/memory_status.hpp"
 #include "includes/backend.hpp"
 #include "includes/context.hpp"

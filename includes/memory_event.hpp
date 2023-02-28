@@ -3,6 +3,7 @@
 #include <string>
 #include <sstream>
 #include <chrono>
+#include <cassert>
 
 #include "includes/application_stage.hpp"
 

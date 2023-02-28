@@ -7,7 +7,7 @@
 
 #include "deps/json.h"
 
-extern "C" __attribute__((visibility("default"))) int tensors_exporter_entry(std::unique_ptr<mori::exporter::TensorsExporter>& ptr, const mori::Context& _context);
+extern "C" __attribute__((visibility("default"))) int tensors_exporter_entry(std::unique_ptr<mori::exporter::TensorsExporter>& ptr, const mori::Context::View& _context);
 
 namespace mori {
 namespace exporter {
@@ -15,7 +15,7 @@ namespace exporter {
 using json = nlohmann::json;
 
 struct JSONTensorsExporter : public TensorsExporter {
-    JSONTensorsExporter(const Context& context): TensorsExporter(context) {}
+    JSONTensorsExporter(const Context::View& context): TensorsExporter(context) {}
     virtual void onTensor(const status::Tensor& tensor) override {
         json obj;
         obj["catagory"] = "tensor";
@@ -47,7 +47,7 @@ struct JSONTensorsExporter : public TensorsExporter {
 }   // namespace exporter
 }   // namespace mori
 
-int tensors_exporter_entry(std::unique_ptr<mori::exporter::TensorsExporter>& ptr, const mori::Context& _context) {
+int tensors_exporter_entry(std::unique_ptr<mori::exporter::TensorsExporter>& ptr, const mori::Context::View& _context) {
     // Backend should be explictly destroyed before the dylib released.
     // Therefore, a heap object and a shared pointer.
     // Set up tensors exporter here.

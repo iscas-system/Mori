@@ -14,26 +14,27 @@ struct memory_exception : public std::exception {
     virtual ~memory_exception() = default;
 };  // struct memory_exception
 
-struct memory_host_insufficience : public memory_exception {
-    memory_host_insufficience() = default;
-    memory_host_insufficience(const memory_host_insufficience& exception) = default;
+struct memory_insufficience : public memory_exception {
+protected:
+    std::string reason;
+    size_t size;
 
-    memory_host_insufficience& operator=(const memory_host_insufficience& exception) = default;
-    virtual const char* what() const throw() {
-        return "Memory bad alloc.";
+public:
+    memory_insufficience(const std::string& _reason, size_t _size): reason(_reason), size(_size) {}
+    virtual const char* what() const noexcept override {
+        return reason.c_str();
     }
+    virtual size_t demand() const { return size; }
+};  // struct memory_insufficience
+
+struct memory_host_insufficience : public memory_insufficience {
+    memory_host_insufficience(const std::string& _reason, size_t _size): memory_insufficience(_reason, _size) {}
 
     virtual ~memory_host_insufficience() = default;
 };  // struct memory_host_insufficience
 
-struct memory_device_insufficience : public memory_exception {
-    memory_device_insufficience() = default;
-    memory_device_insufficience(const memory_device_insufficience& exception) = default;
-
-    memory_device_insufficience& operator=(const memory_device_insufficience& exception) = default;
-    virtual const char* what() const throw() {
-        return "Memory bad alloc.";
-    }
+struct memory_device_insufficience : public memory_insufficience {
+    memory_device_insufficience(const std::string& _reason, size_t _size): memory_insufficience(_reason, _size) {}
 
     virtual ~memory_device_insufficience() = default;
 };  // struct memory_device_insufficience

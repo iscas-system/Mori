@@ -12,9 +12,9 @@
 #include <unordered_set>
 #include <unordered_map>
 
-#include "backend/memory_scheduler.hpp"
 #include "backend/events.hpp"
 #include "backend/dylibs_util.hpp"
+#include "backend/schedulers/memory_scheduler.hpp"
 #include "includes/memory_status.hpp"
 #include "includes/backend.hpp"
 #include "includes/context.hpp"
@@ -64,13 +64,13 @@ public:
 
         // Set up events exporter
         std::string events_exporter_name = context.at("exporters.events");
-        if (events_exporter_name == "empty") events_exporter = std::unique_ptr<exporter::EventsExporter>(new exporter::EventsExporter(context));
-        else events_exporter_hinst = utils::load_dylib("Events Exporter", context.at("exporters.events.path"), "events_exporter_entry", events_exporter, context.view());
+        if (events_exporter_name == "empty") events_exporter = std::unique_ptr<exporter::EventsExporter>(new exporter::EventsExporter(context.view("exporters.events")));
+        else events_exporter_hinst = utils::load_dylib("Events Exporter", context.at("exporters.events.path"), "events_exporter_entry", events_exporter, context.view("exporters.events"));
 
         // Set up tensors exporter
         std::string tensors_exporter_name = context.at("exporters.tensors");
-        if (tensors_exporter_name == "empty") tensors_exporter = std::unique_ptr<exporter::TensorsExporter>(new exporter::TensorsExporter(context));
-        else tensors_exporter_hinst = utils::load_dylib("Tensors Exporter", context.at("exporters.tensors.path"), "tensors_exporter_entry", tensors_exporter, context.view());
+        if (tensors_exporter_name == "empty") tensors_exporter = std::unique_ptr<exporter::TensorsExporter>(new exporter::TensorsExporter(context.view("exporters.tensors")));
+        else tensors_exporter_hinst = utils::load_dylib("Tensors Exporter", context.at("exporters.tensors.path"), "tensors_exporter_entry", tensors_exporter, context.view("exporters.tensors"));
     }
 
     virtual void init() override {

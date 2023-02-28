@@ -30,5 +30,10 @@ struct memory_section_invalid : public memory_status_exception {
     memory_section_invalid(const std::string& _reason): memory_status_exception(_reason) {}
 };  // struct memory_section_invalid
 
+struct memory_section_nonexist : public memory_status_exception {
+    memory_section_nonexist() { reason = "Memory section not exist."; }
+    memory_section_nonexist(const std::string& _reason): memory_status_exception(_reason) {}
+};  // struct memory_section_nonexist
+
 }   // namespace status
 }   // namespace mori

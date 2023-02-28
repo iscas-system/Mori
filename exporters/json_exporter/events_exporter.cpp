@@ -6,7 +6,7 @@
 
 #include "deps/json.h"
 
-extern "C" __attribute__((visibility("default"))) int events_exporter_entry(std::unique_ptr<mori::exporter::EventsExporter>& ptr, const mori::Context& _context);
+extern "C" __attribute__((visibility("default"))) int events_exporter_entry(std::unique_ptr<mori::exporter::EventsExporter>& ptr, const mori::Context::View& _context);
 
 namespace mori {
 namespace exporter {
@@ -14,7 +14,7 @@ namespace exporter {
 using json = nlohmann::json;
 
 struct JSONEventsExporter : public EventsExporter {
-    JSONEventsExporter(const Context& _context): EventsExporter(_context) {}
+    JSONEventsExporter(const Context::View& _context): EventsExporter(_context) {}
 
     virtual void onEvent(const events::MemoryEvent& event) override {
         json obj;
@@ -30,7 +30,7 @@ struct JSONEventsExporter : public EventsExporter {
 }   // namespace exporter
 }   // namespace mori
 
-int events_exporter_entry(std::unique_ptr<mori::exporter::EventsExporter>& ptr, const mori::Context& _context) {
+int events_exporter_entry(std::unique_ptr<mori::exporter::EventsExporter>& ptr, const mori::Context::View& _context) {
     // Backend should be explictly destroyed before the dylib released.
     // Therefore, a heap object and a shared pointer.
     // Set up events exporter here.

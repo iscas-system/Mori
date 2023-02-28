@@ -8,6 +8,7 @@
 
 #include "includes/context.hpp"
 #include "includes/memory_status.hpp"
+#include "includes/memory_event.hpp"
 
 namespace mori {
 namespace exporter {
@@ -49,12 +50,12 @@ struct EventsExporter {
     std::unique_ptr<exportimpl::ExportMethod> export_method;
     void* hInst = nullptr;
 
-    EventsExporter(const Context& context) {
-        std::string export_method_name = context.at("exporters.events.method");
-        Context::View context_view = context.view("exporters.events.method");
+    EventsExporter(const Context::View& context) {
+        std::string export_method_name = context.at("method");
+        Context::View context_view = context.view("method");
         if (export_method_name == "empty") export_method.reset(new exportimpl::ExportMethod(context_view));
         else if (export_method_name == "file") export_method.reset(new exportimpl::FileExportMethod(context_view));
-        else hInst = utils::load_dylib("Events Export Method", context.at("exporters.events.method.path"), "export_method_entry", export_method, context_view);
+        else hInst = utils::load_dylib("Events Export Method", context.at("method.path"), "export_method_entry", export_method, context_view);
     }
 
     virtual void onEvent(const events::MemoryEvent& event) {}
@@ -68,12 +69,12 @@ struct TensorsExporter {
     std::unique_ptr<exportimpl::ExportMethod> export_method;
     void* hInst = nullptr;
 
-    TensorsExporter(const Context& context) {
-        std::string export_method_name = context.at("exporters.tensors.method");
-        Context::View context_view = context.view("exporters.tensors.method");
+    TensorsExporter(const Context::View& context) {
+        std::string export_method_name = context.at("method");
+        Context::View context_view = context.view("method");
         if (export_method_name == "empty") export_method.reset(new exportimpl::ExportMethod(context_view));
         else if (export_method_name == "file") export_method.reset(new exportimpl::FileExportMethod(context_view));
-        else hInst = utils::load_dylib("Events Export Method", context.at("exporters.tensors.method.path"), "export_method_entry", export_method, context_view);
+        else hInst = utils::load_dylib("Events Export Method", context.at("method.path"), "export_method_entry", export_method, context_view);
     }
     virtual void onTensor(const status::Tensor& tensor) {}
     virtual void onOperator(const status::Operator& operator_status) {}

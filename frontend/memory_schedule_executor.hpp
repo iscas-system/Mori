@@ -32,6 +32,9 @@ protected:
     std::atomic<bool> events_updated = false;
     events::ScheduleEvents new_events;
 
+    std::shared_mutex current_operator_m;
+    std::string current_operator;
+
     // Executor thread
     std::thread executor_thread;
     std::recursive_mutex executor_mutex;
@@ -94,38 +97,46 @@ protected:
             const std::string& tensor_name = event.tensor_name;
             size_t size = event.size;
 
+            std::shared_lock<std::shared_mutex> col{current_operator_m};
+            if (current_operator == tensor_name) continue;
+
             status::TensorPres tensor = status.referenceTensor(tensor_name);
-            switch (event.type) {
-                case events::ScheduleEventType::copyin:
-                    executor.copyIn(tensor, size);
-                    break;
-                case events::ScheduleEventType::copyout:
-                    executor.copyOut(tensor, size);
-                    break;
-                case events::ScheduleEventType::swapin:
-                    executor.swapIn(tensor, size);
-                    if (callbacks.count(CallbackStage::postSwapIn)) callbacks.at(CallbackStage::postSwapIn)(tensor_name, tensor.getSection(0).device_address);
-                    (*logger)<<LogLevel::debug<<"Operator "<<operator_name<<": tensor "<<tensor_name<<" swapped in. (Prefetch)";
-                    logger->flush();
-                    // backend_handle.lock()->submitEvent(events::MemoryEvent(tensor_name, size, events::MemoryEventType::swapin));
-                    break;
-                case events::ScheduleEventType::swapout:
-                    executor.swapOut(tensor, size);
-                    if (callbacks.count(CallbackStage::postSwapOut)) callbacks.at(CallbackStage::postSwapOut)(tensor_name, tensor.getSection(0).host_address);
-                    (*logger)<<LogLevel::debug<<"Operator "<<operator_name<<": tensor "<<tensor_name<<" swapped out. (Instant)";
-                    logger->flush();
-                    // backend_handle.lock()->submitEvent(events::MemoryEvent(tensor_name, size, events::MemoryEventType::swapout));
-                    break;
-                case events::ScheduleEventType::freehost:
-                    executor.freeHost(tensor, size);
-                    break;
-                case events::ScheduleEventType::freedev:
-                    executor.freeDevice(tensor, size);
-                case events::ScheduleEventType::free:
-                    executor.free(tensor, size);
-                    break;
-                default:
-                    break;
+            try {
+                switch (event.type) {
+                    case events::ScheduleEventType::copyin:
+                        executor.copyIn(tensor, size);
+                        break;
+                    case events::ScheduleEventType::copyout:
+                        executor.copyOut(tensor, size);
+                        break;
+                    case events::ScheduleEventType::swapin:
+                        executor.swapIn(tensor, size);
+                        if (callbacks.count(CallbackStage::postSwapIn)) callbacks.at(CallbackStage::postSwapIn)(tensor_name, tensor.getSection(0).device_address);
+                        (*logger)<<LogLevel::debug<<"Operator "<<operator_name<<": tensor "<<tensor_name<<" swapped in. (Prefetch)";
+                        logger->flush();
+                        // backend_handle.lock()->submitEvent(events::MemoryEvent(tensor_name, size, events::MemoryEventType::swapin));
+                        break;
+                    case events::ScheduleEventType::swapout:
+                        executor.swapOut(tensor, size);
+                        if (callbacks.count(CallbackStage::postSwapOut)) callbacks.at(CallbackStage::postSwapOut)(tensor_name, tensor.getSection(0).host_address);
+                        (*logger)<<LogLevel::debug<<"Operator "<<operator_name<<": tensor "<<tensor_name<<" swapped out. (Instant)";
+                        logger->flush();
+                        // backend_handle.lock()->submitEvent(events::MemoryEvent(tensor_name, size, events::MemoryEventType::swapout));
+                        break;
+                    case events::ScheduleEventType::freehost:
+                        executor.freeHost(tensor, size);
+                        break;
+                    case events::ScheduleEventType::freedev:
+                        executor.freeDevice(tensor, size);
+                    case events::ScheduleEventType::free:
+                        executor.free(tensor, size);
+                        break;
+                    default:
+                        break;
+                }
+            } catch(std::exception& e) {
+                (*logger)<<LogLevel::debug<<"Exception in executing memory swapping events, reason: " << e.what();
+                logger->flush();
             }
         }
     }
@@ -223,14 +234,17 @@ public:
         events_updated = true;
     }
 
+    void setOperatorStarted(const std::string& op) {
+        std::unique_lock<std::shared_mutex> col{current_operator_m};
+        current_operator = op;
+    }
+
     void setOperatorFinished(const std::string& op) {
         std::unique_lock<std::mutex> ql{queue_m};
         while (current_execution_event_posi != current_eventset.load()->execution.end()) {
             if (current_execution_event_posi->postop == op) {
-                activated_events.push_back(*current_execution_event_posi);
-                break;
-            }
-            ++current_execution_event_posi;
+                activated_events.push_back(*current_execution_event_posi++);
+            } else break;
         }
         // logger->submit(LogLevel::debug, "Memory schedule executor moves to next operator.");
     }

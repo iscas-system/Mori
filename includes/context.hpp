@@ -18,12 +18,12 @@ public:
 
         std::string make_target_key(const std::string& key) const {
             std::string target_key = prefix;
-            if (key != "") target_key = prefix + "." + key;
+            if (prefix != "" && key != "") target_key = prefix + "." + key;
             return target_key;
         }
 
     public:
-        const std::string& at(const std::string& key) const { return context.at(make_target_key(key)); }
+        const std::string& at(const std::string& key = "") const { return context.at(make_target_key(key)); }
         const std::string& at() const { return context.at(prefix); }
         bool signal(const std::string& key) const { return context.signal(make_target_key(key)); }
         bool isParamExists(const std::string& key) const { return context.isParamExists(make_target_key(key)); }
