@@ -10,7 +10,9 @@
 #include <shared_mutex>
 #include <cassert>
 
-#include "includes/exceptions.hpp"
+#include "includes/memory_info.hpp"
+#include "includes/exceptions/status_exceptions.hpp"
+#include "includes/exceptions/memory_status_exceptions.hpp"
 
 namespace mori {
 namespace status {
@@ -65,7 +67,20 @@ public:
     ~MemorySection() = default;
 };
 
+/**
+ * Fragment is a simplified MemorySection
+ */
+struct Fragment final {
+    size_t size = 0;
+    void* address = nullptr;
+    MemoryStatusType status = none;
+
+    Fragment() = default;
+    Fragment(size_t _size, void* _address, MemoryStatusType _status = MemoryStatusType::none): size(_size), address(_address), status(_status) {} 
+};  // struct Fragment
+
 struct TensorPres;
+struct MemoryStatus;
 
 /**
  * TensorStatus
@@ -74,6 +89,7 @@ struct TensorPres;
 struct Tensor final {
 private:
     friend struct TensorPres;
+    friend struct MemoryStatus;
 
 private:
     std::string name = "";
@@ -82,6 +98,7 @@ private:
     // Key is the offset of the section, value is the corresponding memory status.
     // When the tensor is fulfilly on device, the sections should be continuous.
     std::map<size_t, MemorySection> sections;
+    Fragment fragment;
 
     // Tensor size
     size_t size = 0;
@@ -93,6 +110,8 @@ private:
     // Indicating if the tensor should be considered in swapping.
     bool persistant = false;
     bool transient = false;
+
+    std::string op = "";
 
 public:
     Tensor() {
@@ -118,10 +137,12 @@ public:
 
     inline void setName(const std::string& _name) { name = _name; }
     inline void setType(MemoryDataType _type) { type = _type; }
+    inline void setSize(size_t _size) { size = _size; sections[0].size = _size; }
     inline void setPersistant(bool _persistant) { persistant = _persistant; }
     inline void setTransient(bool _transient) { transient = _transient; }
 
     inline std::string      getName()          const noexcept { return name; }
+    inline std::string      getOperatorName()  const noexcept { return op; }
     inline size_t           getSize()          const noexcept { return size; }
     inline size_t           getDeviceSize()    const noexcept { return device_size; }
     inline size_t           getHostSize()      const noexcept { return host_size; }
@@ -129,8 +150,10 @@ public:
     inline bool             isPersistant()     const noexcept { return persistant; }
     inline bool             isTransient()      const noexcept { return transient; }
 
-    inline MemorySection& getSection(size_t offset) { return sections.at(offset); }
+    inline const MemorySection& getSection(size_t offset) const { return sections.at(offset); }
     inline int getSectionCount() const noexcept { return sections.size(); }
+    inline const MemorySection& getFirstSection() const { return sections.begin()->second; }
+    inline const MemorySection& getLastSection() const { return sections.rbegin()->second; }
     
     std::vector<size_t> getSections() const {
         std::vector<size_t> re;
@@ -140,7 +163,27 @@ public:
 
     inline bool isSectionExist(size_t offset) const noexcept { return sections.find(offset) != sections.end(); }
 
+    /**
+     * If tensor has data located on device.
+     */
+    bool isDeviceLocated() const noexcept {
+        for (auto &x : sections) {
+            if (x.second.status == empty || x.second.status == device || x.second.status == coexist) return true;
+        }
+        return false;
+    }
+    /**
+     * If tensor has all data located on device.
+     */
+    bool isDeviceAllLoacted() const noexcept {
+        for (auto &x : sections) {
+            if (x.second.status == none || x.second.status == host) return false;
+        }
+        return true;
+    }
+
     void split(size_t offset, size_t size) {
+        assert(size != 0);
         MemorySection& memory_section = sections.at(offset);
 
         if (memory_section.size < size) {
@@ -177,7 +220,7 @@ public:
         return true;
     }
 
-    MemorySection* merge(size_t offset = 0) {
+    MemorySection& merge(size_t offset = 0) {
         if (!isMergeable(offset)) throw memory_section_invalid("Invalid section merging.");
 
         MemorySection& memory_section = sections.at(offset);
@@ -189,9 +232,19 @@ public:
         if (memory_section.post_sect != nullptr) memory_section.post_sect->prev_sect = &memory_section;
         sections.erase(post_offset);
 
-        return &memory_section;
+        return memory_section;
     }
 
+    void setReshaped(size_t _size) {
+        // Since the allocation takes place in the beginning of the application procedure, there should be only one memory section.
+        if (sections.size() != 1) throw status_exception("Set allocated for sectioned tensor.");
+        assert(sections.begin()->first == 0);
+        assert(sections.begin()->second.offset == 0);
+        size = _size;
+        sections.begin()->second.size = size;
+        if (sections[0].status != MemoryStatusType::none) throw status_exception("Set reshaped for allocated tensor.");
+        device_size = size;
+    }
     void setAllocated(void* device_address) {
         // Since the allocation takes place in the beginning of the application procedure, there should be only one memory section.
         if (sections.size() != 1) throw status_exception("Set allocated for sectioned tensor.");
@@ -207,10 +260,11 @@ public:
         for (auto &x : sections) {
             switch(x.second.status) {
                 case empty:
-                case coexist:
                     x.second.status = MemoryStatusType::device;
                 case device:
                     break;
+                case coexist:
+                    throw status_exception("Accessing data not released on host.");
                 default:
                     throw status_exception("Accessing data not on device.");
             }
@@ -339,6 +393,26 @@ public:
                 throw status_exception("No data on host and device while freeing memory.");
         }
         memory_section.status = none;
+    }
+
+    inline bool hasFragment() const noexcept { return fragment.size != 0; }
+    inline const Fragment& getFragment() const noexcept { return fragment; }
+    inline void setFragment(size_t _size) {
+        if (fragment.status != none) throw status_exception("Setting existed fragment size.");
+        fragment.size = _size; 
+    }
+
+    void setFragmentPlaced(void* address) {
+        if (fragment.status != none) throw status_exception("Placing existed fragment.");
+        fragment.status = MemoryStatusType::empty;
+        fragment.address = address;
+    }
+
+    inline void setFragmentPlaced() { setFragmentPlaced((uint8_t*)(sections.at(0).device_address) + size); }
+
+    void setFragmentRemoved() {
+        if (fragment.status == none) throw status_exception("Removing non-exist fragment.");
+        fragment.status = MemoryStatusType::none;
     }
 
     ~Tensor() = default;
@@ -481,6 +555,7 @@ public:
     inline void reference() { l.lock(); }
 
 public:
+    inline void setReshaped(size_t size) { status.setReshaped(size); }
     inline void setAllocated(void* device_address) { status.setAllocated(device_address); }
 
     inline void setAssigned() { status.setAssigned(); }
@@ -496,25 +571,38 @@ public:
     inline void setDeviceFreed(size_t offset = 0) { status.setDeviceFreed(offset); }
     inline void setFreed(size_t offset = 0)       { status.setFreed(offset); }
 
-    inline std::string      getName()       const noexcept { return status.getName(); }
-    inline size_t           getSize()       const noexcept { return status.getSize(); }
-    inline size_t           getDeviceSize() const noexcept { return status.getDeviceSize(); }
-    inline size_t           getHostSize()   const noexcept { return status.getHostSize(); }
-    inline MemoryDataType   getType()       const noexcept { return status.getType(); }
-    inline bool             isPersistant()  const noexcept { return status.isPersistant(); }
-    inline bool             isTransient()   const noexcept { return status.isTransient(); }
+    inline std::string      getName()           const noexcept { return status.getName(); }
+    inline std::string      getOperatorName()   const noexcept { return status.getOperatorName(); }
+    inline size_t           getSize()           const noexcept { return status.getSize(); }
+    inline size_t           getDeviceSize()     const noexcept { return status.getDeviceSize(); }
+    inline size_t           getHostSize()       const noexcept { return status.getHostSize(); }
+    inline MemoryDataType   getType()           const noexcept { return status.getType(); }
+    inline bool             isPersistant()      const noexcept { return status.isPersistant(); }
+    inline bool             isTransient()       const noexcept { return status.isTransient(); }
 
     inline const MemorySection& getSection(size_t offset) const { return status.getSection(offset); }
     inline int getSectionCount() const noexcept { return status.getSectionCount(); }
-    // std::vector<size_t> getSections() const { return status.getSections(); }
+    inline const MemorySection& getFirstSection() const { return status.getFirstSection(); }
+    inline const MemorySection& getLastSection() const { return status.getLastSection(); }
 
     inline bool isSectionExist(size_t offset) const noexcept { return status.isSectionExist(offset); }
+
+    inline bool isDeviceLocated() const noexcept { return status.isDeviceLocated(); }
+    inline bool isDeviceAllLocated() const noexcept { return status.isDeviceAllLoacted(); }
 
     inline Tensor& get() noexcept { return status; }
 
     inline void split(size_t offset, size_t size) { status.split(offset, size); }
     inline bool isMergeable(size_t offset) const { return status.isMergeable(offset); }
-    inline MemorySection* merge(size_t offset = 0) { return status.merge(offset); }
+    inline MemorySection& merge(size_t offset = 0) { return status.merge(offset); }
+
+    inline bool hasFragment() const noexcept { return status.hasFragment(); }
+    inline const Fragment& getFragment() const noexcept { return status.getFragment(); }
+    inline void setFragment(size_t _size) { status.setFragment(_size); }
+
+    inline void setFragmentPlaced(void* address) { status.setFragmentPlaced(address); }
+    inline void setFragmentPlaced()  { status.setFragmentPlaced(); }
+    inline void setFragmentRemoved() { status.setFragmentRemoved(); }
 
     inline void release() { l.unlock(); }
 
@@ -582,6 +670,11 @@ private:
         std::shared_mutex m;
         Hold(const T& _target): target(_target) {}
         Hold(T&& _target): target(_target) {}
+        Hold(const Hold& _hold): target(_hold.target) {}
+        Hold(Hold&&) = default;
+
+        Hold& operator=(const Hold& _hold) { target = _hold.target; return *this; }
+        Hold& operator=(Hold&& _hold) = default;
     };  // inner struct Hold
 
 public:
@@ -595,33 +688,37 @@ private:
     std::string operator_entry = "";
 
     // Protect the status map.
-    std::shared_mutex tm, om;
+    // std::shared_mutex tm, om;
+
+    MemoryInfo memory_info;
 
 public:
     MemoryStatus() = default;
-    // MemoryStatus(const MemoryStatus& _status) {
-    //     tensor_statuses = _status.tensor_statuses;
-    //     operator_statuses = _status.operator_statuses;
-    // }
+    MemoryStatus(const MemoryStatus& _status) = default;
     MemoryStatus(MemoryStatus&& _status) {
-        std::unique_lock<std::shared_mutex>{_status.tm};
-        std::unique_lock<std::shared_mutex>{_status.om};
+        // std::unique_lock<std::shared_mutex> tl{_status.tm};
+        // std::unique_lock<std::shared_mutex> ol{_status.om};
         tensor_statuses = std::move(_status.tensor_statuses);
         operator_statuses = std::move(_status.operator_statuses);
+        execution_order = std::move(_status.execution_order);
+        operator_entry = std::move(_status.operator_entry);
+        memory_info = _status.memory_info;
     }
 
-    // MemoryStatus& operator=(const MemoryStatus& _status) {
-    //     tensor_statuses = _status.tensor_statuses;
-    //     operator_statuses = _status.operator_statuses;
-    //     return *this;
-    // }
+    MemoryStatus& operator=(const MemoryStatus& _status) = default;
     MemoryStatus& operator=(MemoryStatus&& _status) {
-        std::unique_lock<std::shared_mutex>{_status.tm};
-        std::unique_lock<std::shared_mutex>{_status.om};
+        // std::unique_lock<std::shared_mutex> tl{_status.tm};
+        // std::unique_lock<std::shared_mutex> ol{_status.om};
         tensor_statuses = std::move(_status.tensor_statuses);
         operator_statuses = std::move(_status.operator_statuses);
+        execution_order = std::move(_status.execution_order);
+        operator_entry = std::move(_status.operator_entry);
+        memory_info = _status.memory_info;
         return *this;
     }
+
+    void setMemoryInfo(const MemoryInfo& _memory_info) { memory_info = _memory_info; }
+    MemoryInfo getMemoryInfo() const { return memory_info; }
 
     /**
      * registerTensor
@@ -630,7 +727,7 @@ public:
      * @param status tensorStatus
      */
     void registerTensor(const Tensor& status) {
-        std::unique_lock<std::shared_mutex>{tm};
+        // std::unique_lock<std::shared_mutex> l{tm};
 
         auto p = tensor_statuses.find(status.getName());
         if (p != tensor_statuses.end()) throw status_exception("Tensor already registered.");
@@ -644,7 +741,7 @@ public:
      * @param tensor tensor name
      */
     void registerTensor(const std::string& tensor) {
-        std::unique_lock<std::shared_mutex>{tm};
+        // std::unique_lock<std::shared_mutex> l{tm};
 
         auto p = tensor_statuses.find(tensor);
         if (p != tensor_statuses.end()) throw status_exception("Tensor already registered.");
@@ -659,15 +756,18 @@ public:
      * @param status operator status
      */
     void registerOperator(const Operator& status) {
-        std::unique_lock<std::shared_mutex>{om};
+        // std::unique_lock<std::shared_mutex> l{om};
 
         auto p = operator_statuses.find(status.getName());
         if (p != operator_statuses.end()) throw status_exception("Operator already registered.");
 
-        for (auto &s : status.getTensors())
+        for (auto &s : status.getTensors()) {
             if (tensor_statuses.find(s) == tensor_statuses.end())
                 // Tensor not registered.
                 throw status_exception("Specified tensor not registered.");
+            // Set operator information for tensor.
+            tensor_statuses.at(s).target.op = status.getName();
+        }
 
         for (auto &s : status.getPrevs())
             if (operator_statuses.find(s) == operator_statuses.end())
@@ -749,8 +849,19 @@ public:
 
     inline OperatorPres referenceOperator(const std::string& op) { return tryReferenceOperator(op).reference(); }
 
+    inline std::unordered_set<std::string> getTensors() {
+        std::unordered_set<std::string> re;
+        for (auto &x : tensor_statuses) re.insert(x.first);
+        return re;
+    }
+    inline std::unordered_set<std::string> getOperators() {
+        std::unordered_set<std::string> re;
+        for (auto &x : operator_statuses) re.insert(x.first);
+        return re;
+    }
+
     void unregisterOperator(const std::string& op) {
-        std::unique_lock<std::shared_mutex>{om};
+        // std::unique_lock<std::shared_mutex> l{om};
         
         auto p = operator_statuses.find(op);
         if (p == operator_statuses.end()) throw status_exception("Operator not registered.");
@@ -768,7 +879,7 @@ public:
      * @param tensor tensor name
     */
     void unregisterTensor(const std::string& tensor) {
-        std::unique_lock<std::shared_mutex>{tm};
+        // std::unique_lock<std::shared_mutex> l{tm};
         
         auto p = tensor_statuses.find(tensor);
         if (p == tensor_statuses.end()) throw status_exception("Tensor not registered.");

@@ -1,6 +1,10 @@
 #pragma once
 
 #include <vector>
+#include <unordered_map>
+#include <string>
+
+#include "includes/memory_layout.hpp"
 
 namespace mori {
 namespace events {
@@ -13,7 +17,7 @@ enum class ScheduleEventType {
     free
 };  // enum class ScheduleEventType
 
-struct ScheduleEvent {
+struct ScheduleEvent final {
     std::string operator_name = "";
     std::string tensor_name   = "";
     size_t      size          = 0;
@@ -34,6 +38,7 @@ struct StageScheduleEvents {
 };  // struct StageScheduleEvents
 
 struct ScheduleEvents {
+    MemoryMap memory_map;
     StageScheduleEvents forward_schedule_events;
     StageScheduleEvents backward_schedule_events;
 };  // struct ScheduleEvents

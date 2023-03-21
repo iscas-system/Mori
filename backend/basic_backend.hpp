@@ -19,7 +19,8 @@
 #include "includes/backend.hpp"
 #include "includes/context.hpp"
 #include "includes/memory_event.hpp"
-#include "includes/exceptions.hpp"
+#include "includes/memory_info.hpp"
+#include "includes/exceptions/status_exceptions.hpp"
 
 namespace mori {
 
@@ -80,24 +81,17 @@ public:
         inited = true;
     }
 
-    virtual void registerTensor(const status::Tensor& tensor) override {
-        if (!inited) throw uninited_exception();
-        if (started) throw inited_exception();
-        status.registerTensor(tensor);
-        tensors_exporter->onTensor(tensor);
-    }
-    virtual void registerOperator(const status::Operator& operator_status) override {
-        if (!inited) throw uninited_exception();
-        if (started) throw inited_exception();
-        status.registerOperator(operator_status);
-        tensors_exporter->onOperator(operator_status);
-    }
-
-    virtual void setEntry(const std::string& op) override {
-        if (!inited) throw uninited_exception();
-        if (started) throw inited_exception();
-        status.setEntry(op);
-        tensors_exporter->onEntry(op);
+    virtual void submitMemoryStatus(const status::MemoryStatus& _status) override {
+        status = _status;
+        for (auto &s : status.getTensors()) {
+            status::TensorPres pres = status.referenceTensor(s);
+            tensors_exporter->onTensor(pres.get());
+        }
+        for (auto &s : status.getOperators()) {
+            status::OperatorPres pres = status.referenceOperator(s);
+            tensors_exporter->onOperator(pres.get());
+        }
+        tensors_exporter->onEntry(status.getEntry());
     }
 
     virtual void start() override {
@@ -125,6 +119,17 @@ public:
         if (!inited) throw uninited_exception();
         if (!started) throw uninited_exception();
 
+        // switch (event.type) {
+        //     case events::MemoryEventType::allocate:
+        //         status.recordMemoryAllocateEvent(event.tensor);
+        //         break;
+        //     case events::MemoryEventType::free:
+        //         status.recordMemoryFreeEvent(event.tensor);
+        //         break;
+        //     default:
+        //         break;
+        // }
+
         events.submitEvent(event);
         events_exporter->onEvent(event);
         scheduler->submitEvent(event);
@@ -133,6 +138,12 @@ public:
     virtual events::ScheduleEvents getScheduleEvents() override {
         if (!inited) throw uninited_exception();
         if (!started) throw uninited_exception();
+
+        events::ScheduleEvents&& re = scheduler->getScheduleEvents();
+        for (auto &x : re.memory_map.getFragmentInfo()) {
+            status::TensorPres pres = status.referenceTensor(x.first);
+            pres.setFragment(x.second);
+        }
         return scheduler->getScheduleEvents();
     }
 
@@ -175,17 +186,6 @@ public:
         started = false;
         // Examine if the thread terminates properly
         if (scheduler_thread.joinable()) scheduler_thread.join();
-    }
-
-    virtual void unregisterTensor(const std::string& tensor) override {
-        if (!inited) throw uninited_exception();
-        if (started) throw inited_exception();
-        status.unregisterTensor(tensor);
-    }
-    virtual void unregisterOperator(const std::string& op) override {
-        if (!inited) throw uninited_exception();
-        if (started) throw inited_exception();
-        status.unregisterOperator(op);
     }
 
     virtual void terminate() override {

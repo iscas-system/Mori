@@ -5,7 +5,7 @@
 #include "includes/logging.hpp"
 #include "includes/memory_status.hpp"
 #include "includes/memory_event.hpp"
-#include "includes/exceptions.hpp"
+#include "includes/exceptions/status_exceptions.hpp"
 
 #ifndef ENABLE_EXTERNAL_BACKEND
 #include "includes/basic_backend.hpp"
@@ -30,9 +30,7 @@ struct BackendHandle {
 
     virtual void init() = 0;
 
-    virtual void registerTensor(const status::Tensor&) = 0;
-    virtual void registerOperator(const status::Operator&) {}
-    virtual void setEntry(const std::string& _op) {}
+    virtual void submitMemoryStatus(const status::MemoryStatus& status) = 0;
 
     virtual void start() {}
     
@@ -44,9 +42,6 @@ struct BackendHandle {
     virtual void halfIteration() = 0;
 
     virtual void stop() {}
-
-    virtual void unregisterTensor(const std::string&) = 0;
-    virtual void unregisterOperator(const std::string&) {}
 
     virtual void terminate() {
         if (!inited) throw uninited_exception();
@@ -73,14 +68,8 @@ struct LocalBackendHandle : public BackendHandle {
         inited = true;
     }
 
-    virtual void registerTensor(const status::Tensor& _tensor) override {
-        backend->registerTensor(_tensor);
-    }
-    virtual void registerOperator(const status::Operator& _operator) override {
-        backend->registerOperator(_operator);
-    }
-    virtual void setEntry(const std::string& _operator) override {
-        backend->setEntry(_operator);
+    virtual void submitMemoryStatus(const status::MemoryStatus& _status) override {
+        backend->submitMemoryStatus(_status);
     }
 
     virtual void start() override { backend->start(); }
@@ -100,13 +89,6 @@ struct LocalBackendHandle : public BackendHandle {
     }
 
     virtual void stop() override { backend->stop(); }
-
-    virtual void unregisterTensor(const std::string& _tensor) override {
-        backend->unregisterTensor(_tensor);
-    }
-    virtual void unregisterOperator(const std::string& _operator) override {
-        backend->unregisterOperator(_operator);
-    }
 
     virtual void terminate() override {
         if (!inited) throw uninited_exception();

@@ -8,7 +8,7 @@
 #include "includes/context.hpp"
 #include "includes/memory_status.hpp"
 #include "includes/logging.hpp"
-#include "includes/exceptions.hpp"
+#include "includes/exceptions/status_exceptions.hpp"
 
 namespace mori {
 
@@ -55,9 +55,14 @@ protected:
         UninitedImpl(Frontend& _frontend): Impl(_frontend) {}
 
         virtual void setMemoryManager(MemoryManager* _mem_manager) override {
+            if (_mem_manager == nullptr) throw status_exception("Memory manager assigned to null pointer.");
+
             frontend.mem_manager = _mem_manager;
             frontend.executor.setMemoryManager(_mem_manager);
             frontend.session.setMemoryManager(_mem_manager);
+
+            frontend.memory_status.setMemoryInfo(_mem_manager->getMemoryInfo());
+            frontend.memory_layout.setMemoryInfo(_mem_manager->getMemoryInfo());
         }
         virtual void setLogger(Logger* _logger) override {
             if (_logger == nullptr) frontend.logger = &frontend.empty_logger;
@@ -121,22 +126,6 @@ protected:
             throw uninited_exception();
         }
 
-        // virtual int getIteration() const override {
-        //     (*frontend.logger)<<LogLevel::error<<"Frontend uninitialized.";
-        //     frontend.logger->flush();
-        //     throw uninited_exception();
-        // }
-        // virtual void setIteration(int iteration) override {        
-        //     (*frontend.logger)<<LogLevel::error<<"Frontend uninitialized.";
-        //     frontend.logger->flush();
-        //     throw uninited_exception();
-        // }
-        // virtual void newIteration() override {        
-        //     (*frontend.logger)<<LogLevel::error<<"Frontend uninitialized.";
-        //     frontend.logger->flush();
-        //     throw uninited_exception();
-        // }
-
         virtual void updateSchedule() override {
             (*frontend.logger)<<LogLevel::error<<"Updating schedule while frontend not initialized.";
             frontend.logger->flush();
@@ -191,16 +180,12 @@ protected:
 
         virtual void registerTensor(const status::Tensor& tensor) override {
             frontend.memory_status.registerTensor(tensor);
-            frontend.backend_handle->registerTensor(tensor);
-
             (*frontend.logger)<<LogLevel::debug<<"Tensor "<<tensor.getName()<<" registered.";
             frontend.logger->flush();
         }
 
         virtual void registerOperator(const status::Operator& operator_status) override {
             frontend.memory_status.registerOperator(operator_status);
-            frontend.backend_handle->registerOperator(operator_status);
-
             (*frontend.logger)<<LogLevel::debug<<"Operator "<<operator_status.getName()<<" registered.";
             frontend.logger->flush();
         }
@@ -215,7 +200,6 @@ protected:
 
         virtual void setEntry(const std::string& _op) override {
             frontend.memory_status.setEntry(_op);
-            frontend.backend_handle->setEntry(_op);
         }
 
         virtual void setCallback(CallbackStage stage, const std::function<int(const std::string& tensor, void* ptr)>& callback) override {
@@ -224,6 +208,8 @@ protected:
         }
 
         virtual void start() override {
+            frontend.backend_handle->submitMemoryStatus(frontend.memory_status);
+
             frontend.executor.init();
             frontend.backend_handle->start();
             frontend.impl = &frontend.started_impl;
@@ -239,22 +225,6 @@ protected:
             throw uninited_exception();
         }
 
-        // virtual int getIteration() const override {
-        //     (*frontend.logger)<<LogLevel::error<<"Frontend not started.";
-        //     frontend.logger->flush();
-        //     throw uninited_exception();
-        // }
-        // virtual void setIteration(int iteration) override {        
-        //     (*frontend.logger)<<LogLevel::error<<"Frontend not started.";
-        //     frontend.logger->flush();
-        //     throw uninited_exception();
-        // }
-        // virtual void newIteration() override {        
-        //     (*frontend.logger)<<LogLevel::error<<"Frontend not started.";
-        //     frontend.logger->flush();
-        //     throw uninited_exception();
-        // }
-
         virtual void updateSchedule() override {
             (*frontend.logger)<<LogLevel::error<<"Updating schedule for not-started frontend.";
             frontend.logger->flush();
@@ -263,16 +233,12 @@ protected:
 
         virtual void unregisterTensor(const std::string& tensor) override {
             frontend.memory_status.unregisterTensor(tensor);
-            frontend.backend_handle->unregisterTensor(tensor);
-
             (*frontend.logger)<<LogLevel::debug<<"Tensor "<<tensor<<" unregistered.";
             frontend.logger->flush();
         }
 
         virtual void unregisterOperator(const std::string& op) override {
             frontend.memory_status.unregisterOperator(op);
-            frontend.backend_handle->unregisterOperator(op);
-
             (*frontend.logger)<<LogLevel::debug<<"Operator "<<op<<" unregistered.";
             frontend.logger->flush();
         }
@@ -357,6 +323,11 @@ protected:
         
         virtual void updateSchedule() override {
             auto&& event_set = frontend.backend_handle->getScheduleEvents();
+            for (auto &x : event_set.memory_map.getFragmentInfo()) {
+                status::TensorPres pres = frontend.memory_status.referenceTensor(x.first);
+                pres.setFragment(x.second);
+            }
+
             frontend.executor.updateSchedule(event_set);
 
             (*frontend.logger)<<LogLevel::debug<<"Schedule updated.";
@@ -403,6 +374,7 @@ protected:
 
     MemoryManager* mem_manager = nullptr;
     status::MemoryStatus memory_status;
+    layout::MemoryLayout memory_layout;
 
     // Each frontend holds one memory session.
     MemorySession session;
@@ -417,8 +389,8 @@ public:
         inited_impl(*this),
         started_impl(*this),
         context(_context), 
-        session(_context, executor, memory_status),
-        executor(_context, memory_status) {
+        session(_context, executor, memory_status, memory_layout),
+        executor(_context, memory_status, memory_layout) {
         // Set backend
         backend_handle = make_backend_handle(_context);
 
@@ -499,20 +471,6 @@ public:
      * @return Reference to Mori memory swapping session.
      */
     inline MemorySession& getSession() { return impl->getSession(); }
-
-    // /**
-    //  * @brief Get current iteration count.
-    //  * @return Current iteration count.
-    //  */
-    // inline int getIteration() { return impl->getIteration(); }
-    // /**
-    //  * @brief Set current iteration count.
-    //  */
-    // inline void setIteration(int iteration) { impl->setIteration(iteration); }
-    // /**
-    //  * @brief Increase iteration count.
-    //  */
-    // inline void newIteration() { impl->newIteration(); }
 
     /**
      * @brief Update current memory swapping schedule

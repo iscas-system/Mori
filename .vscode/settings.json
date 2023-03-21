@@ -83,7 +83,8 @@
         "valarray": "cpp",
         "cassert": "cpp",
         "*.txt": "cpp",
-        "filesystem": "cpp"
+        "filesystem": "cpp",
+        "memory_resource": "cpp"
     },
     "C_Cpp.errorSquiggles": "Disabled"
 }

@@ -3,6 +3,7 @@
 #include <dlfcn.h>
 
 #include "includes/context.hpp"
+#include "includes/exceptions/backend_exceptions.hpp"
 
 namespace mori {
 namespace utils {

@@ -10,9 +10,7 @@ namespace mori {
 struct Backend {
     virtual void init() = 0;
 
-    virtual void registerTensor(const status::Tensor&) = 0;
-    virtual void registerOperator(const status::Operator& operator_status) {}
-    virtual void setEntry(const std::string& _op) {}
+    virtual void submitMemoryStatus(const status::MemoryStatus& status) = 0;
 
     virtual void start() {}
 
@@ -24,9 +22,6 @@ struct Backend {
     virtual events::ScheduleEvents getScheduleEvents() = 0;
 
     virtual void stop() {}
-
-    virtual void unregisterTensor(const std::string&) = 0;
-    virtual void unregisterOperator(const std::string& op) {}
 
     virtual void terminate() = 0;
     

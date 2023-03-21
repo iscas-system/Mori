@@ -11,7 +11,7 @@ namespace mori {
 namespace events {
 
 enum class MemoryEventType {
-    allocate, write, read, access, swapin, swapout, free
+    allocate, write, read, access, swapin, swapout, free, reshape
 };  // enum MemoryEventType
 
 namespace util {
@@ -31,6 +31,8 @@ namespace util {
                 return "swapout";
             case MemoryEventType::free:
                 return "free";
+            case MemoryEventType::reshape:
+                return "reshape";
         }
 
         assert(0);

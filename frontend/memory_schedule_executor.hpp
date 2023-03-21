@@ -9,14 +9,15 @@
 #include "includes/memory_status.hpp"
 #include "includes/memory_schedule_event.hpp"
 #include "includes/logging.hpp"
-#include "includes/exceptions.hpp"
+#include "includes/exceptions/status_exceptions.hpp"
 
 namespace mori {
 
-struct MemoryScheduleExecutor final{
+struct MemoryScheduleExecutor final {
 protected:
     Context context;
     status::MemoryStatus& status;
+    layout::MemoryLayout& layout;
     Logger* logger = nullptr;
     Callbacks callbacks;
     std::weak_ptr<BackendHandle> backend_handle;
@@ -70,7 +71,7 @@ protected:
 
     void activateEvents() {
         std::vector<events::ScheduleEvent>& eventset = current_eventset.load()->timepoint;
-        std::shared_lock<std::shared_mutex>{events_mutex};
+        std::shared_lock<std::shared_mutex> l{events_mutex};
         
         // Activate timepoint triggered events.
         // Execution triggered events do not need to be activated here.
@@ -114,20 +115,19 @@ protected:
                         if (callbacks.count(CallbackStage::postSwapIn)) callbacks.at(CallbackStage::postSwapIn)(tensor_name, tensor.getSection(0).device_address);
                         (*logger)<<LogLevel::debug<<"Operator "<<operator_name<<": tensor "<<tensor_name<<" swapped in. (Prefetch)";
                         logger->flush();
-                        // backend_handle.lock()->submitEvent(events::MemoryEvent(tensor_name, size, events::MemoryEventType::swapin));
                         break;
                     case events::ScheduleEventType::swapout:
                         executor.swapOut(tensor, size);
                         if (callbacks.count(CallbackStage::postSwapOut)) callbacks.at(CallbackStage::postSwapOut)(tensor_name, tensor.getSection(0).host_address);
                         (*logger)<<LogLevel::debug<<"Operator "<<operator_name<<": tensor "<<tensor_name<<" swapped out. (Instant)";
                         logger->flush();
-                        // backend_handle.lock()->submitEvent(events::MemoryEvent(tensor_name, size, events::MemoryEventType::swapout));
                         break;
                     case events::ScheduleEventType::freehost:
                         executor.freeHost(tensor, size);
                         break;
                     case events::ScheduleEventType::freedev:
                         executor.freeDevice(tensor, size);
+                        break;
                     case events::ScheduleEventType::free:
                         executor.free(tensor, size);
                         break;
@@ -142,7 +142,7 @@ protected:
     }
 
 public:
-    MemoryScheduleExecutor(Context _context, status::MemoryStatus& _status): context(_context), status(_status) {}
+    MemoryScheduleExecutor(Context _context, status::MemoryStatus& _status, layout::MemoryLayout& _layout): context(_context), status(_status), layout(_layout), executor(_layout) {}
 
     MemoryScheduleExecutor(const MemoryScheduleExecutor&) = delete;
     MemoryScheduleExecutor(MemoryScheduleExecutor&& executor) = delete;
@@ -224,12 +224,12 @@ public:
     }
 
     void updateSchedule(const events::ScheduleEvents& _new_events) {
-        std::unique_lock<std::mutex>{new_events_m};
+        std::unique_lock<std::mutex> l{new_events_m};
         this->new_events = _new_events;
         events_updated = true;
     }
     void updateSchedule(events::ScheduleEvents&& _new_events) {
-        std::unique_lock<std::mutex>{new_events_m};
+        std::unique_lock<std::mutex> l{new_events_m};
         this->new_events = std::move(_new_events);
         events_updated = true;
     }

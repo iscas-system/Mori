@@ -5,6 +5,7 @@
 #include <set>
 #include <map>
 #include <utility>
+#include <cassert>
 
 #include "backend/events_exporter.hpp"
 #include "includes/memory_event.hpp"

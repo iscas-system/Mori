@@ -18,7 +18,9 @@
 #include "includes/backend.hpp"
 #include "includes/context.hpp"
 #include "includes/memory_event.hpp"
-#include "includes/exceptions.hpp"
+#include "includes/exceptions/context_exceptions.hpp"
+#include "includes/exceptions/event_exceptions.hpp"
+#include "includes/exceptions/memory_status_exceptions.hpp"
 
 extern "C" __attribute__((visibility("default"))) int backend_entry(std::unique_ptr<mori::Backend>& ptr, const mori::Context& _context);
 
