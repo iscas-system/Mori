@@ -7,31 +7,38 @@
 #include <utility>
 #include <cassert>
 
-#include "backend/events_exporter.hpp"
+#include "backend/exporters.hpp"
 #include "includes/memory_event.hpp"
 
 namespace mori {
 namespace events {
 
+template <typename T>
 struct EventSet;
 
 struct Events final {
 private:
-    friend struct EventSet;
+    friend struct EventSet<MemoryEvent>;
+    friend struct EventSet<ExecutionEvent>;
 
 private:
     int iteration = 0;
-    // key: iteration, value: MemoryEvent
-    std::multimap<int, MemoryEvent> events;
+    // key: iteration, value: MemoryEvent / ExecutionEvent
+    std::multimap<int, MemoryEvent> memory_events;
+    std::multimap<int, ExecutionEvent> execution_events;
 
 public:
     Events() = default;
 
     void submitEvent(const MemoryEvent& event) {
-        events.emplace(iteration, event);
+        memory_events.emplace(iteration, event);
+    }
+    void submitEvent(const ExecutionEvent& event) {
+        execution_events.emplace(iteration, event);
     }
 
-    EventSet select() const;
+    EventSet<MemoryEvent> from_memory_events() const;
+    EventSet<ExecutionEvent> from_execution_events() const;
 
     int getIteration() const noexcept { return iteration; }
     void setIteration(int _iteration) noexcept { iteration = _iteration; }
@@ -41,9 +48,14 @@ public:
 
 };  // struct Events
 
+template <typename T>
 struct EventSet final {
 private:
-    using event_iter = std::multimap<int, MemoryEvent>::const_iterator;
+    friend Events;
+
+private:
+    using event_base = std::multimap<int, T>;
+    using event_iter = typename event_base::const_iterator;
 
     struct Comparator final {
         bool operator()(const event_iter& p, const event_iter& q) const {
@@ -53,26 +65,27 @@ private:
     };  // struct Comparator
 
 public:
-    using item = std::pair<int, MemoryEvent>;
+    using item = std::pair<int, T>;
     using pred = std::function<bool(const item&)>;
     using res  = std::set<event_iter, Comparator>;
 
 private:
-    const std::multimap<int, MemoryEvent>& events_base;
-    std::set<event_iter, Comparator>       events_cond;
-    std::vector<pred>                      preds;
+    const event_base&                events_base;
+    std::set<event_iter, Comparator> events_cond;
+    std::vector<pred>                preds;
 
     bool first_query = true;
 
-public:
-    EventSet(const Events& events): events_base(events.events) {}
+private:
+    EventSet(const event_base& events): events_base(events) {}
 
+public:
     EventSet(const EventSet&) = default;
     EventSet(EventSet&&)      = default;
 
     EventSet select() { return *this; }
 
-    EventSet& where(const std::function<bool(const std::pair<int, MemoryEvent>&)> f) {
+    EventSet& where(const std::function<bool(const std::pair<int, T>&)> f) {
         preds.push_back(f);
         return *this;
     }
@@ -105,14 +118,16 @@ public:
         return *this;
     }
 
-    const res& ref() const noexcept { return events_cond; }
+    inline const res& ref() const noexcept { return events_cond; }
 
-    size_t size() const noexcept { 
+    inline size_t size() const noexcept { 
         if (first_query) return events_base.size();
         return events_cond.size();
     }
 
-    void clear() {
+    inline bool empty() const noexcept { return events_cond.empty(); }
+
+    inline void clear() {
         events_cond.clear();
         first_query = true;
     }
@@ -120,20 +135,17 @@ public:
     ~EventSet() = default;
 };  // struct EventSet
 
-inline EventSet Events::select() const {
-    return EventSet(*this);
+inline EventSet<MemoryEvent> Events::from_memory_events() const {
+    return EventSet<MemoryEvent>{this->memory_events};
 }
 
-/**
- * from
- * Form a from(xxx).select(xxx).where(xxx) query.
- */
-static inline EventSet select_from(const EventSet& events) {
-    return events;
+inline EventSet<ExecutionEvent> Events::from_execution_events() const {
+    return EventSet<ExecutionEvent>{this->execution_events};
 }
 
-static inline EventSet select_from(const Events& events) {
-    return events.select();
+template <typename T>
+inline static EventSet<T> select(const EventSet<T>& event_set) {
+    return event_set;
 }
 
 }   // namespace events

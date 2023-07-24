@@ -25,7 +25,9 @@ struct Operator {
     std::unordered_set<std::string> prevs;
     std::unordered_set<std::string> posts;
 
-    unsigned long process_time = 100;
+    bool backward = false;
+
+    unsigned long process_time = 60;
 };  // Operator
 
 struct Model final {
@@ -68,6 +70,7 @@ public:
             frontend.registerTensor(mori::status::Tensor(x, tensors.at(x).size, mori::status::MemoryDataType::inout));
             mo.setTensor(x);
         }
+        if (_operator.backward) mo.setBackwardPropagation(true);
         frontend.registerOperator(mo);
         operators.emplace(_operator.name, _operator);
         execution_order.push_back(_operator.name);
@@ -102,6 +105,7 @@ public:
         auto p = execution_order.begin();
         while (p != execution_order.end()) {
             Operator& op = operators.at(*p);
+            if (op.backward) break;
 
             for (auto &s : op.tensors) {
                 Tensor& t = tensors.at(s);
@@ -122,6 +126,7 @@ public:
                 }
             }
 
+            request.setOperationStarted();
             std::this_thread::sleep_for(std::chrono::milliseconds(op.process_time));
             request.release();
 
@@ -131,18 +136,9 @@ public:
         session.halfIteration();
 
         // Backward propagation.
-        auto q = execution_order.rbegin();
-        while (q != execution_order.rend()) {
-            Operator& op = operators.at(*q);
-            auto request = session.createRequest(*q);
-            for (auto &s : op.tensors) {
-                // Allocate memory
-                Tensor& t = tensors.at(s);
-                // Execution
-                request.waitTensor(s);
-                request.setMemoryDataAcquired(s);
-            }
-                            
+        while (p != execution_order.end()) {
+            Operator& op = operators.at(*p);
+            auto request = session.createRequest(*p);
             for (auto &s : op.prevs) {
                 for (auto &s1 : operators.at(s).tensors) {
                     request.waitTensor(s1);
@@ -150,17 +146,20 @@ public:
                 }
             }
 
+            request.setOperationStarted();
             std::this_thread::sleep_for(std::chrono::milliseconds(op.process_time));
             request.release();
 
-            for (auto &s : op.tensors) {
-                Tensor& t = tensors.at(s);
-                session.setMemoryDataFreed(*q, s);
-                mem_manager.free(t.address);
-                t.address = nullptr;   
+            for (auto &s : op.prevs) {
+                for (auto &s1 : operators.at(s).tensors) {
+                    Tensor& t = tensors.at(s1);
+                    session.setMemoryDataFreed(*p, s1);
+                    mem_manager.free(t.address);
+                    t.address = nullptr;   
+                }
             }
 
-            ++q;
+            ++p;
         }
 
         mem_manager.check();

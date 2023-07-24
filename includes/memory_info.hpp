@@ -25,13 +25,21 @@ struct PerfModel {
 
 struct MemoryInfo {
 public:
+    struct Block {
+        void* address = nullptr;
+        size_t size   = 0;
+    };  // inner struct Block
+
     struct Device {
         std::string type;
-        size_t total_size;
 
-        size_t block_size;
-        
-        size_t align_size;
+        Block common_block;
+        Block persistent_block;
+        Block transient_block;
+
+        size_t total_size    = 512;
+        size_t align_size    = 512;
+        size_t reserved_size = 0;
     };  // inner struct Device
 
     struct Host {
@@ -48,8 +56,6 @@ static MemoryInfo create_default_memory_info(size_t device, size_t host) {
     MemoryInfo re;
     re.device.type       = "gpu";
     re.device.total_size = device;
-    re.device.block_size = 1048576;
-    re.device.block_size *= 1024;   // 1 GB
     re.device.align_size = 512;     // 512 B
     re.host.type         = "cpu";
     re.host.total_size   = host;

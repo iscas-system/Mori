@@ -84,7 +84,8 @@
         "cassert": "cpp",
         "*.txt": "cpp",
         "filesystem": "cpp",
-        "memory_resource": "cpp"
+        "memory_resource": "cpp",
+        "__verbose_abort": "cpp"
     },
-    "C_Cpp.errorSquiggles": "Disabled"
+    "C_Cpp.errorSquiggles": "disabled"
 }

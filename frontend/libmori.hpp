@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * libMori
+ * Copyright Xin 2022-2023.
+*/
+
 #include "frontend/frontend.hpp"
 #include "frontend/memory_session.hpp"
 #include "frontend/memory_manager.hpp"

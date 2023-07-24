@@ -35,6 +35,7 @@ public:
 
         std::unordered_map<std::string, status::TensorPres> requested_tensors;
         std::atomic<bool> waiting = true;
+        std::atomic<bool> executing = false;
 
         /**
          * isTensorWaited
@@ -46,7 +47,7 @@ public:
             return requested_tensors.find(tensor) != requested_tensors.end();
         }
 
-        Request(MemorySession& _session, const std::string& _op, ApplicationStage _stage): session(_session), op(_op), stage(_stage) { session.sch_executor.setOperatorStarted(_op); }
+        Request(MemorySession& _session, const std::string& _op, ApplicationStage _stage): session(_session), op(_op), stage(_stage) {}
 
     public:
         Request(const Request&) = delete;
@@ -56,6 +57,9 @@ public:
         }
 
         void waitTensor(const std::string& tensor) {
+            if (!waiting) throw uninited_exception();
+            if (executing) throw inited_exception();
+
             // If the tensor waited, it would have been locked on device memory.
             if (isTensorWaited(tensor)) return;
 
@@ -77,8 +81,7 @@ public:
             assert(pres.getDeviceSize() == pres.getSize());
 
             if (session.callbacks.count(CallbackStage::postSwapIn)) session.callbacks.at(CallbackStage::postSwapIn)(tensor, pres.getSection(0).device_address);
-            (*session.logger) << LogLevel::debug << "Operator: " << op << ", tensor: " << tensor << " swapped in. (Memory access)";
-            session.logger->flush();
+            (*session.logger) << LogLevel::debug << "Operator: " << op << ", tensor: " << tensor << " swapped in. (Memory access)" << endl;
             session.backend_handle.lock()->submitEvent(events::MemoryEvent(op, tensor, acquiring_size, events::MemoryEventType::swapin, stage));
         }
 
@@ -92,6 +95,16 @@ public:
         //         waitTensor(x.first, x.second);
         // }
 
+        void setOperationStarted() {
+            if (!waiting) throw uninited_exception();
+            if (executing) throw inited_exception();
+
+            session.sch_executor.setOperatorStarted(op);
+            session.backend_handle.lock()->submitEvent(events::ExecutionEvent(op, events::ExecutionEventType::request, stage));
+
+            executing = true;
+        }
+
         /**
          * setMemoryDataAssigned
          * Set the memory data is assigned, or written.
@@ -101,6 +114,7 @@ public:
          */
         void setMemoryDataAssigned(const std::string& tensor) {
             if (!waiting) throw uninited_exception();
+            if (executing) throw inited_exception();
             if (!isTensorWaited(tensor)) throw status_exception("Tensor not waited.");
             
             // Do not acquire locks here since the tensor is awaited.
@@ -121,6 +135,7 @@ public:
          */
         void setMemoryDataAcquired(const std::string& tensor) {
             if (!waiting) throw uninited_exception();
+            if (executing) throw inited_exception();
             if (!isTensorWaited(tensor)) throw status_exception("Operator or tensor not waited.");
 
             status::TensorPres& pres = requested_tensors.at(tensor);
@@ -138,6 +153,7 @@ public:
          */
         void setMemoryDataAccessed(const std::string& tensor) {
             if (!waiting) throw uninited_exception();
+            if (executing) throw inited_exception();
             if (!isTensorWaited(tensor)) throw status_exception("Tensor not waited.");
             
             status::TensorPres& pres = requested_tensors.at(tensor);
@@ -147,11 +163,22 @@ public:
             session.backend_handle.lock()->submitEvent(events::MemoryEvent(op, tensor, pres.getSize(), events::MemoryEventType::access, stage));
         }
 
+        void setOperationFinished() {
+            if (!waiting) throw uninited_exception();
+            if (!executing) throw uninited_exception();
+            session.sch_executor.setOperatorFinished(op);
+            session.backend_handle.lock()->submitEvent(events::ExecutionEvent(op, events::ExecutionEventType::release, stage));
+
+            executing = false;
+        }
+
         void release() {
+            if (executing) setOperationFinished();
+            if (!waiting) return;
+
             for (auto &x : requested_tensors)
                 x.second.release();
 
-            session.sch_executor.setOperatorFinished(op);
             waiting = false;
         }
 
@@ -211,6 +238,8 @@ public:
 
         sch_executor.newIteration();
         backend_handle.lock()->newIteration();
+
+        (*logger) << LogLevel::info << "Iteration: " << sch_executor.getIteration() << endl;
     }
 
     /**
@@ -223,8 +252,11 @@ public:
         else stage = ApplicationStage::forward;
 
         sch_executor.halfIteration();
+        (*logger) << LogLevel::debug << "Half iteration: " << sch_executor.getIteration() << endl;
         // backend_handle.lock()->
     }
+
+    inline ApplicationStage getStage() { return stage; }
 
     /**
      * @brief Set the memory data has dynamic shape and size changed.
@@ -276,10 +308,16 @@ public:
     /**
      * @brief Wait for available memory. Memory insufficent is an emergency event, hence an independent method is provided.
      * @param size Memory size that should be released.
+     * @return Memory size released.
      * @note Currently this method adopts a FIFO strategy that the firstly forward-propagating operator will be firstly released. 
      */
-    void waitMemory(size_t size) {
-        size_t released_size = 0;
+    size_t waitMemory(size_t size) {
+        size_t released_size = sch_executor.waitMemory(size);
+
+        if (released_size >= size) {
+            (*logger) << LogLevel::info << "Memory insufficient, mori waits for unfinished memory swapping events.";
+            return released_size;
+        }
         
         for (auto &op_name : status.getExecutionOrder()) {
             status::OperatorView op_view = status.tryReferenceOperator(op_name);
@@ -295,13 +333,14 @@ public:
                     status::TensorView tensor_view = status.tryReferenceTensor(tensor_name);
                     if (!tensor_view.isReferenced()) break;
                     status::TensorPres tensor_pres = tensor_view.reference();
-                    // // Do not swap out persistant or transient tensors.
-                    // if (tensor_pres.isPersistant() || tensor_pres.isTransient()) break;
                     // Do not swap out tensors that already host-only.
                     if (!tensor_pres.isDeviceLocated()) break;
-                    
+                    uint8_t* device_address_e = (uint8_t*)(tensor_pres.getLastSection().device_address);
+                    // // Do not swap out persistent or transient tensors.
+                    if (!layout.isCommon(device_address_e)) break;
+
                     // Prepare to swap out this tensor.
-                    uint8_t* device_address_e = (uint8_t*)(tensor_pres.getLastSection().device_address) + tensor_pres.getLastSection().size;
+                    device_address_e += tensor_pres.getLastSection().size;
                     if (tensor_pres.getFragment().status == status::MemoryStatusType::empty) device_address_e += tensor_pres.getFragment().size;
                     int releasing_b = tensor_pres.getDeviceSize();
                     if (tensor_pres.getFragment().status == status::MemoryStatusType::empty) releasing_b += tensor_pres.getFragment().size;
@@ -313,8 +352,7 @@ public:
 
                     std::string op_name = tensor_pres.getOperatorName();
                     if (callbacks.count(CallbackStage::postSwapOut)) callbacks.at(CallbackStage::postSwapOut)(tensor_name, tensor_pres.getSection(0).host_address);
-                    (*logger) << LogLevel::debug << "Operator " << op_name << ": tensor " << tensor_name << " swapped out. (Memory insufficience)";
-                    logger->flush();
+                    (*logger) << LogLevel::debug << "Operator " << op_name << ": tensor " << tensor_name << " swapped out. (Memory insufficience)" << endl;
 
                     backend_handle.lock()->submitEvent(events::MemoryEvent(op_name, tensor_name, releasing_b - releasing_e, events::MemoryEventType::swapout, stage));
 
@@ -323,17 +361,17 @@ public:
 
                     assert(releasing_e == 0);
 
-                    if (!layout.isSectionExist(device_address_e)) break;
-                    layout::MemorySection section = layout.getMemorySection(device_address_e);
-                    if (section.name == "") {
-                        released_size += section.size;
+                    if (!layout.isRegionExist(device_address_e)) break;
+                    layout::MemoryRegion region = layout.getMemoryRegion(device_address_e);
+                    if (region.name == "") {
+                        released_size += region.size;
                         if (released_size >= size) break;
                         // Memory demand unmet.
-                        device_address_e += section.size;
-                        if (!layout.isSectionExist(device_address_e)) break;
-                        section = layout.getMemorySection(device_address_e);
+                        device_address_e += region.size;
+                        if (!layout.isRegionExist(device_address_e)) break;
+                        region = layout.getMemoryRegion(device_address_e);
                     }
-                    tensor_name = section.name;
+                    tensor_name = region.name;
                 }
                 if (released_size >= size) break;
                 // Releasing failed. Try next tensor.
@@ -342,14 +380,9 @@ public:
             if (released_size >= size) break;
         }
 
-        if (released_size >= size) {
-            // (*logger) << LogLevel::info << "Memory insufficient, mori releases " << released_size << " of memory.";
-            // logger->flush();
-        } else {
-            // Mori wait memory failed.
-            (*logger) << LogLevel::info << "Mori memory releasing failed, " << " unmet.";
-            logger->flush();
-        }
+        if (released_size >= size) (*logger) << LogLevel::info << "Memory insufficient, mori releases " << released_size << " of memory." << endl;
+        else (*logger) << LogLevel::info << "Mori memory releasing failed, " << size - released_size << " unmet." << endl;
+        return released_size;
     }
 
     /**

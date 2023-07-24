@@ -6,15 +6,17 @@
 #include <cassert>
 
 #include "includes/application_stage.hpp"
+#include "includes/event_utils.hpp"
+#include "includes/logging.hpp"
 
 namespace mori {
 namespace events {
 
-enum class MemoryEventType {
+enum struct MemoryEventType {
     allocate, write, read, access, swapin, swapout, free, reshape
-};  // enum MemoryEventType
+};  // enum struct MemoryEventType
 
-namespace util {
+namespace utils {
     static std::string get_event_type_str(MemoryEventType type) {
         switch (type) {
             case MemoryEventType::allocate:
@@ -38,11 +40,7 @@ namespace util {
         assert(0);
         return "";
     }
-
-    static long get_timestamp_val(const std::chrono::steady_clock::time_point& timestamp) {
-        return std::chrono::duration_cast<std::chrono::milliseconds>(timestamp.time_since_epoch()).count();
-    }
-}   // namespace util
+}   // namespace utils
 
 struct MemoryEvent final {
     std::string op;
@@ -86,11 +84,16 @@ struct MemoryEvent final {
 
     operator std::string() const {
         std::stringstream ss;
-        ss<<"Timestamp: "<<util::get_timestamp_val(timestamp)<<" operator: "<<op<<" tensor: "<<tensor<<" size: "<<size<<" type: "<<util::get_event_type_str(type)<<" stage: "<<mori::util::get_application_stage_str(stage);
+        ss<<"Timestamp: "<<mori::utils::get_timestamp_val(timestamp)<<" operator: "<<op<<" tensor: "<<tensor<<" size: "<<size<<" type: "<<utils::get_event_type_str(type)<<" stage: "<<mori::utils::get_application_stage_str(stage);
         return ss.str();
     }
 
 };  // struct MemoryEvents
+
+static Logger& operator<<(Logger& logger, const MemoryEvent& event) {
+    logger << static_cast<std::string>(event);
+    return logger;
+}
 
 }   // namespace events
 }   // namespace mori

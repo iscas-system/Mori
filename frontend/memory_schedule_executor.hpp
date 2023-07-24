@@ -33,40 +33,39 @@ protected:
     std::atomic<bool> events_updated = false;
     events::ScheduleEvents new_events;
 
-    std::shared_mutex current_operator_m;
-    std::string current_operator;
-
     // Executor thread
     std::thread executor_thread;
     std::recursive_mutex executor_mutex;
 
     std::deque<events::ScheduleEvent> activated_events;
     std::mutex queue_m;
+    std::atomic<size_t> released_size;
+    std::condition_variable released_cond;
 
     std::atomic<bool> half_iter_sync = false;
     std::atomic<bool> iter_sync = false;
+    std::atomic<int>  iteration = 0;
 
     // The schedule events are ordered.
     // The operator-triggered events are ordered by the execution sequence of operators.
     // The time-triggered events are ordered by the triggering timepoint.
     std::chrono::steady_clock::time_point current_time_offset;
     std::vector<events::ScheduleEvent>::iterator current_timepoint_event_posi;
-    std::vector<events::ScheduleEvent>::iterator current_execution_event_posi;
 
     MemoryOperationExecutor executor;
 
     std::atomic<bool> inited = false;
 
     // Time-triggered events require these methods to reset the schedule timepoint offset.
-    inline int getExecutionTimepoint() { return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - current_time_offset).count(); }
+    inline long getExecutionTimepoint() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - current_time_offset).count(); }
     inline void resetExecution() {
-        // Reset execution of execution-triggered events.
-        current_execution_event_posi = current_eventset.load()->execution.begin();
+        std::unique_lock<std::mutex> queue_lock{queue_m};
+        activated_events.clear();
+        queue_lock.unlock();
+
         // Reset execution of timepoint-triggered events.
         current_time_offset = std::chrono::steady_clock::now();
         current_timepoint_event_posi = current_eventset.load()->timepoint.begin();
-
-        activated_events.clear();
     }
 
     void activateEvents() {
@@ -75,7 +74,7 @@ protected:
         
         // Activate timepoint triggered events.
         // Execution triggered events do not need to be activated here.
-        int current_exec_timepoint = getExecutionTimepoint();
+        long current_exec_timepoint = getExecutionTimepoint();
         auto current_end = std::find_if(current_timepoint_event_posi, eventset.end(), 
             [current_exec_timepoint](const events::ScheduleEvent& event) {return event.timepoint > current_exec_timepoint;});
 
@@ -89,44 +88,61 @@ protected:
 
     void executeEvents() {
         std::unique_lock<std::mutex> queue_lock{queue_m};
-        while (!activated_events.empty()) {
+        auto target_events = std::move(activated_events);
+        queue_lock.unlock();
+        
+        while (!target_events.empty()) {
+            if (half_iter_sync || iter_sync) break;
             // Retrieve tensor information.
-            events::ScheduleEvent event = activated_events.front();
-            activated_events.pop_front();
+            events::ScheduleEvent event = target_events.front();
+            target_events.pop_front();
 
             const std::string& operator_name = event.operator_name;
             const std::string& tensor_name = event.tensor_name;
             size_t size = event.size;
 
-            std::shared_lock<std::shared_mutex> col{current_operator_m};
-            if (current_operator == tensor_name) continue;
-
             status::TensorPres tensor = status.referenceTensor(tensor_name);
+            // (*logger) << LogLevel::debug << "Operator " << operator_name << ": tensor " << tensor_name << " start to be swapped out. (Instant)" << endl;
+            if (!tensor.isMemoryLocated()) continue;
             try {
                 switch (event.type) {
                     case events::ScheduleEventType::copyin:
+                        if (tensor.isDeviceAllLocated()) break;     // No data to copy in.
                         executor.copyIn(tensor, size);
+                        if (callbacks.count(CallbackStage::postSwapIn)) callbacks.at(CallbackStage::postSwapIn)(tensor_name, tensor.getSection(0).device_address);
+                        (*logger) << LogLevel::debug << "Operator " << operator_name << ": tensor " << tensor_name << " copied in. (Prefetch)" << endl;
                         break;
                     case events::ScheduleEventType::copyout:
+                        if (!tensor.isDeviceLocated()) break;       // No data to copy out.
                         executor.copyOut(tensor, size);
                         break;
                     case events::ScheduleEventType::swapin:
+                        if (tensor.isDeviceAllLocated()) break;     // No data to swap in.
                         executor.swapIn(tensor, size);
                         if (callbacks.count(CallbackStage::postSwapIn)) callbacks.at(CallbackStage::postSwapIn)(tensor_name, tensor.getSection(0).device_address);
-                        (*logger)<<LogLevel::debug<<"Operator "<<operator_name<<": tensor "<<tensor_name<<" swapped in. (Prefetch)";
-                        logger->flush();
+                        (*logger) << LogLevel::debug << "Operator " << operator_name << ": tensor " << tensor_name << " swapped in. (Prefetch)" << endl;
                         break;
                     case events::ScheduleEventType::swapout:
+                        if (!tensor.isDeviceLocated()) break;       // No data to swap out.
                         executor.swapOut(tensor, size);
                         if (callbacks.count(CallbackStage::postSwapOut)) callbacks.at(CallbackStage::postSwapOut)(tensor_name, tensor.getSection(0).host_address);
-                        (*logger)<<LogLevel::debug<<"Operator "<<operator_name<<": tensor "<<tensor_name<<" swapped out. (Instant)";
-                        logger->flush();
+                        (*logger) << LogLevel::debug << "Operator " << operator_name << ": tensor " << tensor_name << " swapped out. (Instant)" << endl;
+                        // Finished swapout event.
+                        released_size += size;
+                        released_cond.notify_all();
                         break;
                     case events::ScheduleEventType::freehost:
+                        if (!tensor.isHostLocated()) break;         // No data to free on host.
                         executor.freeHost(tensor, size);
                         break;
                     case events::ScheduleEventType::freedev:
+                        if (!tensor.isDeviceLocated()) break;       // No data to free on device.
                         executor.freeDevice(tensor, size);
+                        if (callbacks.count(CallbackStage::postSwapOut)) callbacks.at(CallbackStage::postSwapOut)(tensor_name, tensor.getSection(0).host_address);
+                        (*logger) << LogLevel::debug << "Operator " << operator_name << ": tensor " << tensor_name << " freed on device. (Instant)" << endl;
+                        // Finished freedev event.
+                        released_size += size;
+                        released_cond.notify_all();
                         break;
                     case events::ScheduleEventType::free:
                         executor.free(tensor, size);
@@ -135,10 +151,11 @@ protected:
                         break;
                 }
             } catch(std::exception& e) {
-                (*logger)<<LogLevel::debug<<"Exception in executing memory swapping events, reason: " << e.what();
-                logger->flush();
+                (*logger) << LogLevel::debug << "Exception in executing memory swapping events, reason: " << e.what() << endl;
             }
         }
+        // Currently no more schedule events.
+        released_cond.notify_all();
     }
 
 public:
@@ -178,35 +195,28 @@ public:
         executor_thread = std::thread([this]() {
             while (inited) {
                 // Examine if synchronization required.
-                if (half_iter_sync || iter_sync) {
-                    // Inactivate all events, and prevent further events.
-                    std::unique_lock<std::mutex> ql{queue_m};
-                    activated_events.clear();
+                if (half_iter_sync) {
+                    std::shared_lock<std::shared_mutex> em{events_m};
+                    assert(current_eventset.load() == &this->forward_schedule_events);
+                    current_eventset.store(&this->backward_schedule_events);
+                    resetExecution();
+                    half_iter_sync = false;
+                }
+                if (iter_sync) {
+                    if (events_updated) {
+                        std::unique_lock<std::shared_mutex> em_n{events_m};
+                        std::unique_lock<std::mutex> nem{new_events_m};
 
-                    if (half_iter_sync) {
-                        std::shared_lock<std::shared_mutex> em{events_m};
-                        assert(current_eventset.load() == &this->forward_schedule_events);
-                        current_eventset.store(&this->backward_schedule_events);
-                        resetExecution();
-                        half_iter_sync = false;
+                        this->forward_schedule_events  = std::move(this->new_events.forward_schedule_events);
+                        this->backward_schedule_events = std::move(this->new_events.backward_schedule_events);
+                        logger->submit(LogLevel::debug, "Memory schedule executor switches to new schedule event set.");
+                        events_updated = false;
                     }
-                    if (iter_sync) {
-                        if (events_updated) {
-                            std::unique_lock<std::shared_mutex> em_n{events_m};
-                            std::unique_lock<std::mutex> nem{new_events_m};
 
-                            this->forward_schedule_events  = std::move(this->new_events.forward_schedule_events);
-                            this->backward_schedule_events = std::move(this->new_events.backward_schedule_events);
-                            logger->submit(LogLevel::debug, "Memory schedule executor switches to new schedule event set.");
-                            events_updated = false;
-                        }
-
-                        std::shared_lock<std::shared_mutex> em{events_m};
-                        current_eventset.store(&this->forward_schedule_events);
-                        resetExecution();
-
-                        iter_sync = false;
-                    }
+                    std::shared_lock<std::shared_mutex> em{events_m};
+                    current_eventset.store(&this->forward_schedule_events);
+                    resetExecution();
+                    iter_sync = false;
                 }
 
                 // Execution of schedule events
@@ -234,29 +244,25 @@ public:
         events_updated = true;
     }
 
-    void setOperatorStarted(const std::string& op) {
-        std::unique_lock<std::shared_mutex> col{current_operator_m};
-        current_operator = op;
-    }
+    void setOperatorStarted(const std::string& op) {}
 
     void setOperatorFinished(const std::string& op) {
         std::unique_lock<std::mutex> ql{queue_m};
-        while (current_execution_event_posi != current_eventset.load()->execution.end()) {
-            if (current_execution_event_posi->postop == op) {
-                activated_events.push_back(*current_execution_event_posi++);
-            } else break;
+        for (auto &x : current_eventset.load()->execution[op]) {
+            activated_events.push_back(x);
         }
         // logger->submit(LogLevel::debug, "Memory schedule executor moves to next operator.");
     }
 
-    int getIteration() { return 0; }
-    void setIteration(int _iteration) {}
+    int getIteration() { return iteration; }
+    void setIteration(int _iteration) { iteration = _iteration; }
 
     void newIteration() {
         if (!inited) throw uninited_exception();
         iter_sync = true;
         while (iter_sync);
         logger->submit(LogLevel::debug, "Memory schedule executor moves to next iteration.");
+        ++iteration;
     }
 
     /**
@@ -277,6 +283,20 @@ public:
         // Examine if the thread terminates properly
         if (executor_thread.joinable()) executor_thread.join();
 
+    }
+
+    size_t waitMemory(size_t size) {
+        // Assume swapout events only exist in forward propagation.
+        if (current_eventset.load() == &this->backward_schedule_events) return 0;
+        std::unique_lock<std::mutex> ql{queue_m};
+        if (activated_events.empty()) return 0;
+
+        released_size = 0;
+        released_cond.wait(ql, [this, size]() {
+            if (released_size >= size) return true;
+            return activated_events.empty();
+            });
+        return released_size;
     }
 
     ~MemoryScheduleExecutor() {

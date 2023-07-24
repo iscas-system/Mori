@@ -53,6 +53,8 @@ protected:
         defaults.emplace("exporters.events.method", "empty");
         defaults.emplace("exporters.tensors", "empty");
         defaults.emplace("exporters.tensors.method", "empty");
+        defaults.emplace("exporters.schedule", "empty");
+        defaults.emplace("exporters.schedule.method", "empty");
     }
 
 public:
@@ -73,8 +75,8 @@ public:
     }
 
     Context(Context&& _context) {
-        defaults = move(_context.defaults);
-        contexts = move(_context.contexts);
+        defaults = std::move(_context.defaults);
+        contexts = std::move(_context.contexts);
     }
 
     void operator=(const Context& _context) {
@@ -83,8 +85,8 @@ public:
     }
 
     void operator=(Context&& _context) {
-        defaults = move(_context.defaults);
-        contexts = move(_context.contexts);
+        defaults = std::move(_context.defaults);
+        contexts = std::move(_context.contexts);
     }
 
     std::string& at(const std::string& key) {

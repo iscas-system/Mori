@@ -2,11 +2,11 @@
 
 namespace mori {
 
-enum class ApplicationStage {
+enum struct ApplicationStage {
     all, forward, backward
-};  // enum class ApplicationStage
+};  // enum struct ApplicationStage
 
-namespace util {
+namespace utils {
 
 static std::string get_application_stage_str(ApplicationStage stage) {
     switch (stage) {
@@ -17,5 +17,5 @@ static std::string get_application_stage_str(ApplicationStage stage) {
     return "";
 }
 
-}   // namespace util
+}   // namespace utils
 }   // namespace mori

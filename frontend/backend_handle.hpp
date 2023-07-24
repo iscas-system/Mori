@@ -5,6 +5,7 @@
 #include "includes/logging.hpp"
 #include "includes/memory_status.hpp"
 #include "includes/memory_event.hpp"
+#include "includes/execution_event.hpp"
 #include "includes/exceptions/status_exceptions.hpp"
 
 #ifndef ENABLE_EXTERNAL_BACKEND
@@ -35,6 +36,7 @@ struct BackendHandle {
     virtual void start() {}
     
     virtual void submitEvent(const events::MemoryEvent& event) = 0;
+    virtual void submitEvent(const events::ExecutionEvent& event) = 0;
     virtual events::ScheduleEvents getScheduleEvents() = 0;
 
     virtual void setIteration(int _iteration) = 0;
@@ -75,8 +77,11 @@ struct LocalBackendHandle : public BackendHandle {
     virtual void start() override { backend->start(); }
 
     virtual void submitEvent(const events::MemoryEvent& event) override {
-        (*logger)<<LogLevel::info<<"Submiting of event "<<event;
-        logger->flush();
+        (*logger) << LogLevel::debug << "Submiting of event " << event << endl;
+        backend->submitEvent(event);
+    }
+    virtual void submitEvent(const events::ExecutionEvent& event) override {
+        (*logger) << LogLevel::debug << "Submiting of event " << event << endl;
         backend->submitEvent(event);
     }
 

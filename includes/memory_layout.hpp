@@ -10,11 +10,10 @@
 #include "includes/memory_info.hpp"
 #include "includes/address_utils.hpp"
 #include "includes/exceptions/memory_exceptions.hpp"
+#include "includes/exceptions/status_exceptions.hpp"
 
 namespace mori {
-namespace decisions {
-    struct Model;
-}   // namespace decisions
+namespace layout {
 
 struct Region final {
     std::string name;
@@ -54,36 +53,29 @@ public:
     const_iterator end() const { return regions.end(); }
 };  // struct Layer
 
-/**
- * Describe the layout for all tensors in the memory.
- */
-struct MemoryMap final {
-private:
-    friend struct decisions::Model;
+struct MemoryMap;
 
-private:
+struct MemoryMapBuilder final {
     std::unordered_map<std::string, Region> regions;
     std::vector<Layer> layers;
 
-    size_t memory_size = 0;
+    MemoryInfo memory_info;
 
     int current_layer = 0;
 
-public:
-    MemoryMap() { layers.emplace_back(); }
+    MemoryMapBuilder() { layers.emplace_back(); }
 
-    inline void setMemorySize(size_t _size) {
-        memory_size = _size;
-        layers[0].size = _size;
+    inline void setMemoryInfo(const MemoryInfo& _memory_info) {
+        if (layers.size() != 1 || !layers[0].regions.empty()) throw inited_exception("Memory map on built.");
+        memory_info = _memory_info;
+        layers[0].size = _memory_info.device.common_block.size;
     }
-    inline size_t getMemorySize() { return memory_size; }
+    inline const MemoryInfo& getMemoryInfo() const noexcept { return memory_info; };
 
     inline void createLayer() { 
-        layers.emplace_back(memory_size);
+        layers.emplace_back(memory_info.device.common_block.size);
         ++current_layer;
     }
-    inline Layer& referenceLayer(int _layer) { return layers[_layer]; }
-    inline Layer& referenceLayer() { return referenceLayer(current_layer); }
 
     inline void submitMemoryRegion(int _layer, const Region& _region) {
         layers[_layer].submit(_region.name, _region.size);
@@ -95,8 +87,59 @@ public:
     inline Layer& getLayer(int layer) { return layers[layer]; }
     inline const Layer& getLayer(int layer) const { return layers[layer]; }
     inline Layer& getCurrentLayer() { return getLayer(current_layer); }
-    inline std::vector<size_t> getSections(const std::string& tensor) const { return regions.at(tensor).sections; }
+    inline const Layer& getCurrentLayer() const { return getLayer(current_layer); }
+    inline std::vector<Layer>& getLayers() { return layers; }
+    inline const std::vector<Layer>& getLayers() const { return layers; }
+    inline const std::vector<size_t>& getSections(const std::string& tensor) const { return regions.at(tensor).sections; }
     inline size_t getFragmentSize(const std::string& tensor) const { return regions.at(tensor).fragment_size; }
+    inline std::unordered_map<std::string, Region>& getRegions() { return regions; }
+    inline const std::unordered_map<std::string, Region>& getRegions() const { return regions; }
+
+    std::unordered_map<std::string, size_t> getFragmentInfo() const {
+        std::unordered_map<std::string, size_t> re;
+        for (auto &x : regions) {
+            if (x.second.fragment_size != 0) re.emplace(x.first, x.second.fragment_size);
+        }
+        return re;
+    }
+
+    inline MemoryMap build();
+
+    void clear() {
+        regions.clear();
+        layers.clear();
+    }
+};  // struct MemoryMapBuilder
+
+/**
+ * Describe the layout for all tensors in the memory.
+ */
+struct MemoryMap {
+private:
+    std::unordered_map<std::string, Region> regions;
+    std::vector<Layer> layers;
+
+    MemoryInfo memory_info;
+
+    int current_layer = 0;
+
+public:
+    MemoryMap() = default;
+    MemoryMap(const MemoryMapBuilder& builder): regions(builder.regions), layers(builder.layers), memory_info(builder.memory_info), current_layer(builder.current_layer) {}
+
+    inline const MemoryInfo& getMemoryInfo() const noexcept { return memory_info; };
+
+    inline const Layer& referenceLayer(int _layer) const { return layers.at(_layer); }
+    inline const Layer& referenceLayer() const { return referenceLayer(current_layer); }
+    inline const Region& referenceRegion(const std::string& _region) const { return regions.at(_region); }
+
+    inline int getLayersCount() const { return layers.size(); }
+    inline const Layer& getLayer(int layer) const { return layers[layer]; }
+    inline const Layer& getCurrentLayer() const { return getLayer(current_layer); }
+    inline const std::vector<Layer>& getLayers() const { return layers; }
+    inline const std::vector<size_t>& getSections(const std::string& tensor) const { return regions.at(tensor).sections; }
+    inline size_t getFragmentSize(const std::string& tensor) const { return regions.at(tensor).fragment_size; }
+    inline const std::unordered_map<std::string, Region>& getRegions() const { return regions; }
 
     std::unordered_map<std::string, size_t> getFragmentInfo() const {
         std::unordered_map<std::string, size_t> re;
@@ -112,36 +155,48 @@ public:
     }
 };  // struct MemoryMap
 
-namespace layout {
+MemoryMap MemoryMapBuilder::build() { return MemoryMap(*this); }
 
-struct MemorySection final {
+enum struct MemoryBlockType {
+    common, persistent, transient
+};  // enum struct MemoryBlockType
+
+struct MemoryRegion final {
     std::string name = "";  // Tensor information
 
     void* address = nullptr;
     size_t size = 0;
 
     bool allocated = false;
-};  // struct MemorySection
+};  // struct MemoryRegion
 
 struct Block final {
-    std::map<void*, MemorySection> sections;
+    MemoryBlockType type;
+    std::map<void*, MemoryRegion> regions;
+    std::shared_mutex m;
 
-    Block(void* address, size_t size) {
-        MemorySection s;
+    Block(MemoryBlockType block_type, void* address, size_t size) {
+        type = block_type;
+        MemoryRegion s;
         s.address = address;
         s.size    = size;
-        sections.emplace(s.address, s);
+        regions.emplace(s.address, s);
+    }
+    Block(const Block& block) {
+        type    = block.type;
+        regions = block.regions;
+    }
+    Block(Block&& block) {
+        type    = block.type;
+        regions = std::move(block.regions);
     }
 };  // struct Block
 
 struct MemoryLayout final {
 private:
     std::map<void*, Block> blocks;
+    // std::shared_mutex m;
 
-    std::shared_mutex m;
-
-    size_t device_size;
-    size_t block_size;
     size_t align_size;
 
 protected:
@@ -155,26 +210,49 @@ public:
     MemoryLayout() = default;
 
     inline void setMemoryInfo(const MemoryInfo& info) {
-        device_size = info.device.total_size;
-        block_size  = info.device.block_size;
+        assert(blocks.empty());
+
+        blocks.emplace(info.device.common_block.address,     Block(MemoryBlockType::common,     info.device.common_block.address,     info.device.common_block.size));
+        blocks.emplace(info.device.persistent_block.address, Block(MemoryBlockType::persistent, info.device.persistent_block.address, info.device.persistent_block.size));
+        blocks.emplace(info.device.transient_block.address,  Block(MemoryBlockType::transient,  info.device.transient_block.address,  info.device.transient_block.size));
+
         align_size  = info.device.align_size;
     }
 
-    inline bool isSectionExist(void* address) {
-        std::shared_lock<std::shared_mutex> l{m};
+    inline bool isRegionExist(void* address) {
         auto bp = locateMemoryBlock(address);
         if (bp == blocks.end()) return false;
-        auto& sections = bp->second.sections;
-        return sections.find(address) != sections.end();
+        std::shared_lock<std::shared_mutex> l{bp->second.m};
+        auto& regions = bp->second.regions;
+        return regions.find(address) != regions.end();
     }
-    inline MemorySection getMemorySection(void* address) {
-        std::shared_lock<std::shared_mutex> l{m};
+    inline MemoryRegion getMemoryRegion(void* address) {
         auto bp = locateMemoryBlock(address);
         if (bp == blocks.end()) throw memory_unmanaged();
-        auto& sections = bp->second.sections;
-        auto sp = sections.find(address);
-        if (sp == sections.end()) throw memory_unmanaged();
+        std::shared_lock<std::shared_mutex> l{bp->second.m};
+        auto& regions = bp->second.regions;
+        auto sp = regions.find(address);
+        if (sp == regions.end()) throw memory_unmanaged();
         return sp->second;
+    }
+
+    inline bool isPersistent(void* address) {
+        auto bp = locateMemoryBlock(address);
+        if (bp == blocks.end()) throw memory_unmanaged();
+        std::shared_lock<std::shared_mutex> l{bp->second.m};
+        return bp->second.type == MemoryBlockType::persistent;
+    }
+    inline bool isTransient(void* address) {
+        auto bp = locateMemoryBlock(address);
+        if (bp == blocks.end()) throw memory_unmanaged();
+        std::shared_lock<std::shared_mutex> l{bp->second.m};
+        return bp->second.type == MemoryBlockType::transient;
+    }
+    inline bool isCommon(void* address) {
+        auto bp = locateMemoryBlock(address);
+        if (bp == blocks.end()) throw memory_unmanaged();
+        std::shared_lock<std::shared_mutex> l{bp->second.m};
+        return bp->second.type == MemoryBlockType::common;
     }
 
     inline void recordMemoryAllocateEvent(void* address, size_t size, const std::string& tensor, size_t alignment) {
@@ -184,28 +262,24 @@ public:
             return;
         }
 
-        std::unique_lock<std::shared_mutex> l{m};
-
         auto bp = blocks.upper_bound(address);
-        if (bp == blocks.begin()) bp = blocks.emplace(address, Block(address, block_size)).first;
-        else {
-            --bp;
-            if (utils::address_offset(bp->first, block_size) <= address) bp = blocks.emplace(address, Block(address, block_size)).first;
-        }
+        assert(bp != blocks.begin());
+        --bp;
 
-        auto& sections = bp->second.sections;
-        auto p = sections.begin();
-        while (p != sections.end() && utils::address_offset(p->first, p->second.size) <= address) ++p;
-        if (p == sections.end() || p->first > address || p->second.allocated) throw memory_allocated(address);
+        std::unique_lock<std::shared_mutex> l{bp->second.m};
+        auto& regions = bp->second.regions;
+        auto p = regions.begin();
+        while (p != regions.end() && utils::address_offset(p->first, p->second.size) <= address) ++p;
+        if (p == regions.end() || p->first > address || p->second.allocated) throw memory_allocated(address);
         if (utils::address_offset(p->first, p->second.size) < utils::address_offset(address, size)) throw memory_operation_invalid(address, "Memory cannot be allocated at specificied address with size.");
 
         // The original unallocated space should be splited to three parts.
         if (p->first < address) {
             // Left part exists.
-            MemorySection s;
+            MemoryRegion s;
             s.address = address;
             s.size    = (uint8_t*)p->first - (uint8_t*)address + p->second.size;
-            auto q = sections.emplace(address, s);
+            auto q = regions.emplace(address, s);
             assert(q.second);
             p->second.size = (uint8_t*)address - (uint8_t*)p->first;
             p = q.first;
@@ -213,11 +287,11 @@ public:
         // Now p->first == address
         if (p->second.size > size) {
             // Right part exists.
-            // Create empty section
-            MemorySection s;
+            // Create empty region
+            MemoryRegion s;
             s.address = (uint8_t*)address + size;
             s.size    = p->second.size - size;
-            auto q = sections.emplace(s.address, s);
+            auto q = regions.emplace(s.address, s);
             assert(q.second);
             p->second.size = size;
         }
@@ -230,68 +304,65 @@ public:
         if (aligned_size == 0) aligned_size = align_size;
         recordMemoryAllocateEvent(address, aligned_size, tensor, align_size);
     }
-    inline void recordMemoryFreeEvent(void* address, const std::string& tensor = "") {
-        std::unique_lock<std::shared_mutex> l{m};
-        
+    inline void recordMemoryFreeEvent(void* address, const std::string& tensor = "") {        
         auto bp = locateMemoryBlock(address);
         if (bp == blocks.end()) throw memory_not_allocated(address);
 
-        auto& sections = bp->second.sections;
+        std::unique_lock<std::shared_mutex> l{bp->second.m};
+        auto& regions = bp->second.regions;
         // Check if allocated device memory.
-        auto p = sections.find(address);
+        auto p = regions.find(address);
         // Device memory not allocated.
-        if (p == sections.end() || !p->second.allocated) throw memory_not_allocated(address);
+        if (p == regions.end() || !p->second.allocated) throw memory_not_allocated(address);
         p->second.name      = "";
         p->second.allocated = false;
 
-        // Merging free sections.
+        // Merging free regions.
         auto prev = p;
         auto post = p;
         ++post;
-        if (post != sections.end() && !post->second.allocated) {
+        if (post != regions.end() && !post->second.allocated) {
             p->second.size += post->second.size;
-            sections.erase(post);
+            regions.erase(post);
         }
 
-        if (p == sections.begin()) return;
+        if (p == regions.begin()) return;
         --prev;
         if (!prev->second.allocated) {
             prev->second.size += p->second.size;
-            sections.erase(p);
+            regions.erase(p);
         }
     }
     inline void recordMemorySplitEvent(void* address, size_t size) {
-        std::unique_lock<std::shared_mutex> l{m};
-
         auto bp = locateMemoryBlock(address);
         if (bp == blocks.end()) throw memory_not_allocated(address);
 
-        auto& sections = bp->second.sections;
-        auto p = sections.find(address);
-        if (p == sections.end() || !p->second.allocated) throw memory_not_allocated(address);
+        std::unique_lock<std::shared_mutex> l{bp->second.m};
+        auto& regions = bp->second.regions;
+        auto p = regions.find(address);
+        if (p == regions.end() || !p->second.allocated) throw memory_not_allocated(address);
         if (p->second.size <= size) throw memory_operation_invalid(address, "Memory section equals or be smaller than spliting size.");
 
-        MemorySection s = p->second;
+        MemoryRegion s = p->second;
         s.address = utils::address_offset(address, size);
         s.size   -=  size;
-        sections.emplace(s.address, s);
+        regions.emplace(s.address, s);
         p->second.size = size;
     }
     inline void recordMemoryMergeEvent(void* left, void* right) {
-        std::unique_lock<std::shared_mutex> l{m};
-
         auto bp = locateMemoryBlock(left);
         if (bp == blocks.end()) throw memory_not_allocated(left);
 
-        auto& sections = bp->second.sections;
-        auto q = sections.find(left);
-        if (q == sections.end() || !q->second.allocated) throw memory_not_allocated(left, "Memory for left section not allocated."); 
+        std::unique_lock<std::shared_mutex> l{bp->second.m};
+        auto& regions = bp->second.regions;
+        auto q = regions.find(left);
+        if (q == regions.end() || !q->second.allocated) throw memory_not_allocated(left, "Memory for left section not allocated."); 
         auto p = q++;
-        if (q == sections.end() || q->first != right || !q->second.allocated) throw memory_not_allocated(right, "Memory for right section not allocated."); 
+        if (q == regions.end() || q->first != right || !q->second.allocated) throw memory_not_allocated(right, "Memory for right section not allocated."); 
         if ((uint8_t*)left + p->second.size != (uint8_t*)right) throw memory_operation_invalid(left, "Memory sections not continuous.");
 
         p->second.size += q->second.size;
-        sections.erase(q);
+        regions.erase(q);
     }
 
 };  // struct MemoryLayout

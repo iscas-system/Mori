@@ -87,71 +87,59 @@ protected:
         virtual bool isInited() const noexcept override { return false; }
 
         virtual void registerTensor(const status::Tensor& tensor) override {
-            (*frontend.logger)<<LogLevel::error<<"Registering tensor "<<tensor.getName()<<" while frontend not initialized.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Registering tensor " << tensor.getName() << " while frontend not initialized." << endl;
             throw uninited_exception();
         }
         virtual void registerOperator(const status::Operator& operator_status) override {
-            (*frontend.logger)<<LogLevel::error<<"Registering operator "<<operator_status.getName()<<" while frontend not initialized.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Registering operator " << operator_status.getName() << " while frontend not initialized." << endl;
             throw uninited_exception();
         }
         // virtual void updateOperator(const std::string& op, const status::Tensor& tensor_status) override {
-        //     (*logger)<<LogLevel::error<<"Updating operator "<<op<<" while frontend not initialized.";
-        //     logger->flush();
+        //     (*logger)<<LogLevel::error<<"Updating operator "<<op<<" while frontend not initialized." << endl;
         //     throw uninited_exception();
         // }
         virtual void setEntry(const std::string& _op) override {
-            (*frontend.logger)<<LogLevel::error<<"Setting entry operator "<<_op<<" while frontend not initialized.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Setting entry operator " << _op << " while frontend not initialized." << endl;
             throw uninited_exception();
         }
 
         virtual void setCallback(CallbackStage stage, const std::function<int(const std::string& tensor, void* ptr)>& callback) override {
-            (*frontend.logger)<<LogLevel::error<<"Setting callbacks while frontend not initialized.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Setting callbacks while frontend not initialized." << endl;
             throw uninited_exception();
         }
 
         virtual void start() override {
-            (*frontend.logger)<<LogLevel::error<<"Starting uninitialized frontend.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Starting uninitialized frontend." << endl;
             throw uninited_exception();
         }
         virtual bool isStarted() const noexcept override { return false; }
 
         virtual MemorySession& getSession() override {
-            (*frontend.logger)<<LogLevel::error<<"Referencing to session from uninitialized frontend.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Referencing to session from uninitialized frontend." << endl;
             throw uninited_exception();
         }
 
         virtual void updateSchedule() override {
-            (*frontend.logger)<<LogLevel::error<<"Updating schedule while frontend not initialized.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Updating schedule while frontend not initialized." << endl;
             throw uninited_exception();
         }
 
         virtual void unregisterTensor(const std::string& tensor) override {
-            (*frontend.logger)<<LogLevel::error<<"Unregistering tensor "<<tensor<<" while frontend not initialized.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Unregistering tensor " << tensor << " while frontend not initialized." << endl;
             throw uninited_exception();
         }
         virtual void unregisterOperator(const std::string& op) override {
-            (*frontend.logger)<<LogLevel::error<<"Unregistering operator "<<op<<" while frontend not initialized.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Unregistering operator " << op << " while frontend not initialized." << endl;
             throw uninited_exception();
         }
 
         virtual void stop() override {
-            (*frontend.logger)<<LogLevel::error<<"Stopping uninitialized frontend.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Stopping uninitialized frontend." << endl;
             throw uninited_exception();
         }
 
         virtual void terminate() override {
-            (*frontend.logger)<<LogLevel::error<<"Terminating uninitialized frontend.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Terminating uninitialized frontend." << endl;
             throw uninited_exception();
         }
     };  // struct UninitedImpl
@@ -160,42 +148,36 @@ protected:
         InitedImpl(Frontend& _frontend): Impl(_frontend) {}
 
         virtual void setMemoryManager(MemoryManager* _mem_manager) override {
-            (*frontend.logger)<<LogLevel::error<<"Setting memory manager for initialized frontend.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Setting memory manager for initialized frontend." << endl;
             throw inited_exception();
         }
 
         virtual void setLogger(Logger* _logger) override {
-            (*frontend.logger)<<LogLevel::error<<"Setting logger for initialized frontend.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Setting logger for initialized frontend." << endl;
             throw inited_exception();
         }
 
         virtual void init() override {
-            (*frontend.logger)<<LogLevel::error<<"Initializing frontend that already inited.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Initializing frontend that already inited." << endl;
             throw inited_exception();
         }
         virtual bool isInited() const noexcept override { return true; }
 
         virtual void registerTensor(const status::Tensor& tensor) override {
             frontend.memory_status.registerTensor(tensor);
-            (*frontend.logger)<<LogLevel::debug<<"Tensor "<<tensor.getName()<<" registered.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::debug << "Tensor " << tensor.getName() << " registered." << endl;
         }
 
         virtual void registerOperator(const status::Operator& operator_status) override {
             frontend.memory_status.registerOperator(operator_status);
-            (*frontend.logger)<<LogLevel::debug<<"Operator "<<operator_status.getName()<<" registered.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::debug << "Operator " << operator_status.getName() << " registered." << endl;
         }
 
         // virtual void updateOperator(const std::string& op, const status::Tensor& tensor_status) override {
         //     memory_status.updateOperator(op, tensor_status);
         //     // backend_handle->updateOperator(op, tensor_status);
 
-        //     (*logger)<<LogLevel::debug<<"Operator "<<op<<" updated.";
-        //     logger->flush();
+        //     (*logger)<<LogLevel::debug<<"Operator "<<op<<" updated." << endl;
         // }
 
         virtual void setEntry(const std::string& _op) override {
@@ -213,39 +195,33 @@ protected:
             frontend.executor.init();
             frontend.backend_handle->start();
             frontend.impl = &frontend.started_impl;
-            (*frontend.logger)<<LogLevel::debug<<"Mori started.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::debug << "Mori started." << endl;
         }
 
         virtual bool isStarted() const noexcept override { return false; }
 
         virtual MemorySession& getSession() override {
-            (*frontend.logger)<<LogLevel::error<<"Referencing to session from not-started frontend.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Referencing to session from not-started frontend." << endl;
             throw uninited_exception();
         }
 
         virtual void updateSchedule() override {
-            (*frontend.logger)<<LogLevel::error<<"Updating schedule for not-started frontend.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Updating schedule for not-started frontend." << endl;
             throw uninited_exception();
         }
 
         virtual void unregisterTensor(const std::string& tensor) override {
             frontend.memory_status.unregisterTensor(tensor);
-            (*frontend.logger)<<LogLevel::debug<<"Tensor "<<tensor<<" unregistered.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::debug << "Tensor " << tensor << " unregistered." << endl;
         }
 
         virtual void unregisterOperator(const std::string& op) override {
             frontend.memory_status.unregisterOperator(op);
-            (*frontend.logger)<<LogLevel::debug<<"Operator "<<op<<" unregistered.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::debug << "Operator " << op << " unregistered." << endl;
         }
 
         virtual void stop() override {
-            (*frontend.logger)<<LogLevel::error<<"Stopping non-started frontend.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Stopping non-started frontend." << endl;
             throw uninited_exception();
         }
 
@@ -263,57 +239,48 @@ protected:
         StartedImpl(Frontend& _frontend): Impl(_frontend) {}
 
         virtual void setMemoryManager(MemoryManager* _mem_manager) override {
-            (*frontend.logger)<<LogLevel::error<<"Setting memory manager for started frontend.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Setting memory manager for started frontend." << endl;
             throw inited_exception();
         }
         virtual void setLogger(Logger* _logger) override {
-            (*frontend.logger)<<LogLevel::error<<"Setting logger for started frontend.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Setting logger for started frontend." << endl;
             throw inited_exception();
         }
 
         virtual void init() override {
-            (*frontend.logger)<<LogLevel::error<<"Initializing frontend that already started.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Initializing frontend that already started." << endl;
             throw inited_exception();
         }
-        virtual bool isInited() const noexcept override {return true;}
+        virtual bool isInited() const noexcept override { return true; }
 
         virtual void registerTensor(const status::Tensor& tensor) override {
-            (*frontend.logger)<<LogLevel::error<<"Registering tensor "<<tensor.getName()<<" while frontend started.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Registering tensor " << tensor.getName() << " while frontend started." << endl;
             throw inited_exception();
         }
         virtual void registerOperator(const status::Operator& operator_status) override {
-            (*frontend.logger)<<LogLevel::error<<"Registering operator "<<operator_status.getName()<<" while frontend started.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Registering operator " << operator_status.getName() << " while frontend started." << endl;
             throw inited_exception();
         }
 
         // virtual void updateOperator(const std::string& op, const status::Tensor& tensor_status) {
         //     if (!inited) {
-        //         (*logger)<<LogLevel::error<<"Updating operator "<<op<<" while frontend not initialized.";
-        //         logger->flush();
+        //         (*logger)<<LogLevel::error<<"Updating operator "<<op<<" while frontend not initialized." << endl;
         //         throw uninited_exception();
         //     }
         // }
 
         virtual void setEntry(const std::string& _op) override {
-            (*frontend.logger)<<LogLevel::error<<"Setting entry operator "<<_op<<" while frontend started.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Setting entry operator " << _op << " while frontend started." << endl;
             throw inited_exception();
         }
 
         virtual void setCallback(CallbackStage stage, const std::function<int(const std::string& tensor, void* ptr)>& callback) override {
-            (*frontend.logger)<<LogLevel::error<<"Setting callbacks while frontend started.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Setting callbacks while frontend started." << endl;
             throw inited_exception();
         }
 
         virtual void start() override {
-            (*frontend.logger)<<LogLevel::error<<"Frontend already started.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Frontend already started." << endl;
             throw inited_exception();
         }
 
@@ -330,19 +297,16 @@ protected:
 
             frontend.executor.updateSchedule(event_set);
 
-            (*frontend.logger)<<LogLevel::debug<<"Schedule updated.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::info << "Memory swapping schedule updated." << endl;
         }
 
         virtual void unregisterTensor(const std::string& tensor) override {
-            (*frontend.logger)<<LogLevel::error<<"Unregistering tensor "<<tensor<<" while frontend not initialized.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Unregistering tensor " << tensor << " while frontend not initialized." << endl;
             throw uninited_exception();
         }
 
         virtual void unregisterOperator(const std::string& op) override {
-            (*frontend.logger)<<LogLevel::error<<"Unregistering operator "<<op<<" while frontend not initialized.";
-            frontend.logger->flush();
+            (*frontend.logger) << LogLevel::error << "Unregistering operator " << op << " while frontend not initialized." << endl;
             throw uninited_exception();
         }
 

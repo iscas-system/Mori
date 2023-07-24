@@ -1,6 +1,7 @@
 #pragma once
 
 #include "includes/memory_event.hpp"
+#include "includes/execution_event.hpp"
 #include "includes/memory_schedule_event.hpp"
 #include "includes/memory_status.hpp"
 
@@ -19,6 +20,7 @@ struct Backend {
     virtual void halfIteration() = 0;
 
     virtual void submitEvent(const events::MemoryEvent& event) = 0;
+    virtual void submitEvent(const events::ExecutionEvent& event) = 0;
     virtual events::ScheduleEvents getScheduleEvents() = 0;
 
     virtual void stop() {}

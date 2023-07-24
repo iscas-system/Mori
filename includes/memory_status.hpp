@@ -17,13 +17,13 @@
 namespace mori {
 namespace status {
 
-enum MemoryDataType {
+enum struct MemoryDataType {
     all, inout, weight, workspace, constant
-};  // enum MemoryType
+};  // enum struct MemoryType
 
-enum MemoryStatusType {
+enum struct MemoryStatusType {
     none, empty, device, host, coexist, swapin, swapout
-};  // enum MemoryDataStatusType
+};  // enum struct MemoryDataStatusType
 
 struct Tensor;
 
@@ -46,7 +46,7 @@ public:
     void* host_address   = nullptr;
     void* device_address = nullptr;
 
-    MemoryStatusType status = none;
+    MemoryStatusType status = MemoryStatusType::none;
 
 public:
     MemorySection() = default;
@@ -73,7 +73,7 @@ public:
 struct Fragment final {
     size_t size = 0;
     void* address = nullptr;
-    MemoryStatusType status = none;
+    MemoryStatusType status = MemoryStatusType::none;
 
     Fragment() = default;
     Fragment(size_t _size, void* _address, MemoryStatusType _status = MemoryStatusType::none): size(_size), address(_address), status(_status) {} 
@@ -105,10 +105,10 @@ private:
     // Remaining tensor size in memory
     size_t device_size = 0;
     size_t host_size = 0;
-    MemoryDataType type = all;
+    MemoryDataType type = MemoryDataType::all;
 
     // Indicating if the tensor should be considered in swapping.
-    bool persistant = false;
+    bool persistent = false;
     bool transient = false;
 
     std::string op = "";
@@ -121,12 +121,12 @@ public:
         name = _name;
     }
     Tensor(const std::string& _name, size_t _size): name(_name), size(_size), device_size(_size), host_size(0) {
-        sections.emplace(0, MemorySection{0, _size, nullptr, nullptr, none});
+        sections.emplace(0, MemorySection{0, _size, nullptr, nullptr, MemoryStatusType::none});
         // if (_size < 1048576 * 4) transient = true; 
     }
     Tensor(const std::string& _name, size_t _size, MemoryDataType _type): Tensor(_name, _size) {
         type = _type;
-        if (_type == MemoryDataType::constant || _type == MemoryDataType::weight) persistant = true;
+        if (_type == MemoryDataType::constant || _type == MemoryDataType::weight) persistent = true;
         if (_type == MemoryDataType::workspace) transient = true;
     }
     Tensor(const Tensor& _status) = default;
@@ -138,7 +138,7 @@ public:
     inline void setName(const std::string& _name) { name = _name; }
     inline void setType(MemoryDataType _type) { type = _type; }
     inline void setSize(size_t _size) { size = _size; sections[0].size = _size; }
-    inline void setPersistant(bool _persistant) { persistant = _persistant; }
+    inline void setPersistent(bool _persistent) { persistent = _persistent; }
     inline void setTransient(bool _transient) { transient = _transient; }
 
     inline std::string      getName()          const noexcept { return name; }
@@ -147,7 +147,7 @@ public:
     inline size_t           getDeviceSize()    const noexcept { return device_size; }
     inline size_t           getHostSize()      const noexcept { return host_size; }
     inline MemoryDataType   getType()          const noexcept { return type; }
-    inline bool             isPersistant()     const noexcept { return persistant; }
+    inline bool             isPersistent()     const noexcept { return persistent; }
     inline bool             isTransient()      const noexcept { return transient; }
 
     inline const MemorySection& getSection(size_t offset) const { return sections.at(offset); }
@@ -168,18 +168,45 @@ public:
      */
     bool isDeviceLocated() const noexcept {
         for (auto &x : sections) {
-            if (x.second.status == empty || x.second.status == device || x.second.status == coexist) return true;
+            if (x.second.status == MemoryStatusType::empty || x.second.status == MemoryStatusType::device || x.second.status == MemoryStatusType::coexist) return true;
         }
         return false;
     }
     /**
      * If tensor has all data located on device.
      */
-    bool isDeviceAllLoacted() const noexcept {
+    bool isDeviceAllLocated() const noexcept {
         for (auto &x : sections) {
-            if (x.second.status == none || x.second.status == host) return false;
+            if (x.second.status == MemoryStatusType::none || x.second.status == MemoryStatusType::host) return false;
         }
         return true;
+    }
+    /**
+     * If tensor has data located on host.
+     */
+    bool isHostLocated() const noexcept {
+        for (auto &x : sections) {
+            if (x.second.status == MemoryStatusType::host || x.second.status == MemoryStatusType::coexist) return true;
+        }
+        return false;
+    }
+    /**
+     * If tensor has all data located on host.
+     */
+    bool isHostAllLocated() const noexcept {
+        for (auto &x : sections) {
+            if (x.second.status == MemoryStatusType::none || x.second.status == MemoryStatusType::empty || x.second.status == MemoryStatusType::device) return false;
+        }
+        return true;
+    }
+    /**
+     * If tensor has data located on host or device.
+     */
+    bool isMemoryLocated() const noexcept {
+        for (auto &x : sections) {
+            if (x.second.status != MemoryStatusType::none) return true;
+        }
+        return false;
     }
 
     void split(size_t offset, size_t size) {
@@ -259,11 +286,11 @@ public:
     void setAssigned() {
         for (auto &x : sections) {
             switch(x.second.status) {
-                case empty:
-                    x.second.status = MemoryStatusType::device;
-                case device:
+                case MemoryStatusType::empty:
+                    if (size != 0) x.second.status = MemoryStatusType::device;
+                case MemoryStatusType::device:
                     break;
-                case coexist:
+                case MemoryStatusType::coexist:
                     throw status_exception("Accessing data not released on host.");
                 default:
                     throw status_exception("Accessing data not on device.");
@@ -273,9 +300,9 @@ public:
     void setAcquired() {
         for (auto &x : sections) {
             switch(x.second.status) {
-                case coexist:
-                case device:
-                case empty:
+                case MemoryStatusType::coexist:
+                case MemoryStatusType::device:
+                case MemoryStatusType::empty:
                     break;
                 default:
                     throw status_exception("Acquiring data not on device.");
@@ -289,11 +316,11 @@ public:
         MemorySection& memory_section = sections.at(offset);
         memory_section.host_address = host_address;
         switch(memory_section.status) {
-            case device:
+            case MemoryStatusType::device:
                 memory_section.status = MemoryStatusType::coexist;
                 host_size += memory_section.size;
-            case coexist:
-            case empty:
+            case MemoryStatusType::coexist:
+            case MemoryStatusType::empty:
                 break;
             default:    // none host
                 throw status_exception("No data on device while copying out memory data.");
@@ -311,12 +338,12 @@ public:
         MemorySection& memory_section = sections.at(offset);
         memory_section.device_address = device_address;
         switch(memory_section.status) {
-            case none:
+            case MemoryStatusType::none:
                 memory_section.status = MemoryStatusType::empty;
                 break;
-            case host:
+            case MemoryStatusType::host:
                 memory_section.status = MemoryStatusType::coexist;
-            case coexist:
+            case MemoryStatusType::coexist:
                 break;
             default:    // device empty
                 throw status_exception("No data on host while copying in memory data.");
@@ -335,9 +362,9 @@ public:
         MemorySection& memory_section = sections.at(offset);
         memory_section.device_address = dst_address;
         switch(memory_section.status) {
-            case empty:
-            case device:
-            case coexist:
+            case MemoryStatusType::empty:
+            case MemoryStatusType::device:
+            case MemoryStatusType::coexist:
                 break;
             default:    // device none
                 throw status_exception("No data on device while moving memory data.");
@@ -347,11 +374,11 @@ public:
     void setHostFreed(size_t offset) {
         MemorySection& memory_section = sections.at(offset);
         switch (memory_section.status) {
-            case coexist:
-                memory_section.status = device;
+            case MemoryStatusType::coexist:
+                memory_section.status = MemoryStatusType::device;
                 break;
-            case host:
-                memory_section.status = none;
+            case MemoryStatusType::host:
+                memory_section.status = MemoryStatusType::none;
                 break;
             default:    // none empty device
                 throw status_exception("No data on host while freeing host memory.");
@@ -362,12 +389,12 @@ public:
     void setDeviceFreed(size_t offset) {
         MemorySection& memory_section = sections.at(offset);
         switch (memory_section.status) {
-            case coexist:
-                memory_section.status = host;
+            case MemoryStatusType::coexist:
+                memory_section.status = MemoryStatusType::host;
                 break;
-            case empty:
-            case device:
-                memory_section.status = none;
+            case MemoryStatusType::empty:
+            case MemoryStatusType::device:
+                memory_section.status = MemoryStatusType::none;
                 break;
             default:    // none host
                 throw status_exception("No data on host while freeing host memory.");
@@ -378,32 +405,32 @@ public:
     void setFreed(size_t offset) {
         MemorySection& memory_section = sections.at(offset);
         switch (memory_section.status) {
-            case coexist:
+            case MemoryStatusType::coexist:
                 device_size -= memory_section.size;
                 host_size -= memory_section.size;
                 break;
-            case empty:
-            case device:
+            case MemoryStatusType::empty:
+            case MemoryStatusType::device:
                 device_size -= memory_section.size;
                 break;
-            case host:
+            case MemoryStatusType::host:
                 host_size -= memory_section.size;
                 break;
             default:    // none
                 throw status_exception("No data on host and device while freeing memory.");
         }
-        memory_section.status = none;
+        memory_section.status = MemoryStatusType::none;
     }
 
     inline bool hasFragment() const noexcept { return fragment.size != 0; }
     inline const Fragment& getFragment() const noexcept { return fragment; }
     inline void setFragment(size_t _size) {
-        if (fragment.status != none) throw status_exception("Setting existed fragment size.");
+        if (fragment.status != MemoryStatusType::none) throw status_exception("Setting existed fragment size.");
         fragment.size = _size; 
     }
 
     void setFragmentPlaced(void* address) {
-        if (fragment.status != none) throw status_exception("Placing existed fragment.");
+        if (fragment.status != MemoryStatusType::none) throw status_exception("Placing existed fragment.");
         fragment.status = MemoryStatusType::empty;
         fragment.address = address;
     }
@@ -411,7 +438,7 @@ public:
     inline void setFragmentPlaced() { setFragmentPlaced((uint8_t*)(sections.at(0).device_address) + size); }
 
     void setFragmentRemoved() {
-        if (fragment.status == none) throw status_exception("Removing non-exist fragment.");
+        if (fragment.status == MemoryStatusType::none) throw status_exception("Removing non-exist fragment.");
         fragment.status = MemoryStatusType::none;
     }
 
@@ -446,33 +473,10 @@ private:
 public:
     Operator() = default;
     Operator(const std::string& _name): name(_name) {}
-    Operator(const Operator& _op) {
-        name = _op.name;
-        prevs = _op.prevs;
-        posts = _op.posts;
-        tensors = _op.tensors;
-    }
-    Operator(Operator&& _op) {
-        name = std::move(_op.name);
-        prevs = std::move(_op.prevs);
-        posts = std::move(_op.posts);
-        tensors = std::move(_op.tensors);
-    }
-
-    Operator& operator=(const Operator& _op) {
-        name = _op.name;
-        prevs = _op.prevs;
-        posts = _op.posts;
-        tensors = _op.tensors;
-        return *this;
-    }
-    Operator& operator=(Operator&& _op) {
-        name = std::move(_op.name);
-        prevs = std::move(_op.prevs);
-        posts = std::move(_op.posts);
-        tensors = std::move(_op.tensors);
-        return *this;
-    }
+    Operator(const Operator& _op) = default;
+    Operator(Operator&& _op) = default;
+    Operator& operator=(const Operator& _op) = default;
+    Operator& operator=(Operator&& _op) = default;
 
     inline bool isBackwardPropagation() const noexcept { return backward_propagation; }
     inline void setBackwardPropagation(bool _backward_propagation) noexcept { backward_propagation = _backward_propagation; }
@@ -577,7 +581,7 @@ public:
     inline size_t           getDeviceSize()     const noexcept { return status.getDeviceSize(); }
     inline size_t           getHostSize()       const noexcept { return status.getHostSize(); }
     inline MemoryDataType   getType()           const noexcept { return status.getType(); }
-    inline bool             isPersistant()      const noexcept { return status.isPersistant(); }
+    inline bool             isPersistent()      const noexcept { return status.isPersistent(); }
     inline bool             isTransient()       const noexcept { return status.isTransient(); }
 
     inline const MemorySection& getSection(size_t offset) const { return status.getSection(offset); }
@@ -587,8 +591,11 @@ public:
 
     inline bool isSectionExist(size_t offset) const noexcept { return status.isSectionExist(offset); }
 
-    inline bool isDeviceLocated() const noexcept { return status.isDeviceLocated(); }
-    inline bool isDeviceAllLocated() const noexcept { return status.isDeviceAllLoacted(); }
+    inline bool isDeviceLocated()    const noexcept { return status.isDeviceLocated(); }
+    inline bool isDeviceAllLocated() const noexcept { return status.isDeviceAllLocated(); }
+    inline bool isHostLocated()      const noexcept { return status.isHostLocated(); }
+    inline bool isHostAllLocated()   const noexcept { return status.isHostAllLocated(); }
+    inline bool isMemoryLocated()    const noexcept { return status.isMemoryLocated(); }
 
     inline Tensor& get() noexcept { return status; }
 
@@ -788,6 +795,11 @@ public:
 
     inline std::vector<std::string> getExecutionOrder() const noexcept { return execution_order; }
 
+    inline bool hasExecutionPost(const std::string& op) const {
+        auto p = std::find(execution_order.begin(), execution_order.end(), op);
+        if (p == execution_order.end()) throw status_exception("Operator not registered.");
+        return ++p != execution_order.end();
+    }
     inline std::string getExecutionPost(const std::string& op) const {
         auto p = std::find(execution_order.begin(), execution_order.end(), op);
         if (p == execution_order.end()) throw status_exception("Operator not registered.");
@@ -795,11 +807,16 @@ public:
         return *p;
     }
 
+    inline bool hasExecutionPrev(const std::string& op) const {
+        auto p = std::find(execution_order.begin(), execution_order.end(), op);
+        if (p == execution_order.end()) throw status_exception("Operator not registered.");
+        return p != execution_order.begin();
+    }
     inline std::string getExecutionPrev(const std::string& op) const {
         auto p = std::find(execution_order.begin(), execution_order.end(), op);
         if (p == execution_order.end()) throw status_exception("Operator not registered.");
-        if (p-- == execution_order.begin()) return "";
-        return *p;
+        if (p == execution_order.begin()) return "";
+        return *--p;
     }
 
     template<typename T>
@@ -849,12 +866,12 @@ public:
 
     inline OperatorPres referenceOperator(const std::string& op) { return tryReferenceOperator(op).reference(); }
 
-    inline std::unordered_set<std::string> getTensors() {
+    inline std::unordered_set<std::string> getTensors() const {
         std::unordered_set<std::string> re;
         for (auto &x : tensor_statuses) re.insert(x.first);
         return re;
     }
-    inline std::unordered_set<std::string> getOperators() {
+    inline std::unordered_set<std::string> getOperators() const {
         std::unordered_set<std::string> re;
         for (auto &x : operator_statuses) re.insert(x.first);
         return re;
@@ -898,7 +915,7 @@ public:
 
 };  // struct MemoryStatus
 
-namespace util {
+namespace utils {
 
 static std::string get_tensor_type_str(MemoryDataType type) {
     switch (type) {
@@ -918,7 +935,7 @@ static std::string get_tensor_type_str(MemoryDataType type) {
     return "";
 }
 
-}   // namespace util
+}   // namespace utils
 
 using TensorView   = status::MemoryStatus::TensorView;
 using OperatorView = status::MemoryStatus::OperatorView;

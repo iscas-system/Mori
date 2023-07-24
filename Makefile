@@ -25,6 +25,7 @@ all: header library exporters
 clean:
 	@rm -rf build
 	@rm -rf main main.dSYM
+	@rm -rf *.log
 
 usage:
 	@echo "Usages:"

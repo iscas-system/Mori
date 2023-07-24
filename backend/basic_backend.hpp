@@ -18,6 +18,7 @@
 #include "includes/memory_status.hpp"
 #include "includes/backend.hpp"
 #include "includes/context.hpp"
+#include "includes/execution_event.hpp"
 #include "includes/memory_event.hpp"
 #include "includes/memory_info.hpp"
 #include "includes/exceptions/status_exceptions.hpp"
@@ -40,9 +41,12 @@ protected:
     events::Events events;
     std::unique_ptr<exporter::EventsExporter> events_exporter;
     void* events_exporter_hinst = nullptr;
+    std::mutex events_m;
 
     std::unique_ptr<MemoryScheduler> scheduler;
     void* scheduler_hinst = nullptr;
+    std::unique_ptr<exporter::ScheduleExporter> schedule_exporter;
+    void* schedule_exporter_hinst = nullptr;
     
     std::atomic<bool> inited  = false;
     std::atomic<bool> started = false;
@@ -59,8 +63,8 @@ public:
         // Set up scheduler
         std::string scheduler_name = context.at("scheduler");
         if (scheduler_name == "fifo") scheduler = std::unique_ptr<MemoryScheduler>(new FIFOMemoryScheduler(context, status, events));
-        else if (scheduler_name == "dependency") scheduler = std::unique_ptr<MemoryScheduler>(new DependencyAwareMemoryScheduler(context, status, events));
-        else if (scheduler_name == "maxsize") scheduler = std::unique_ptr<MemoryScheduler>(new MaximumSizePriorityMemoryScheduler(context, status, events));
+        // else if (scheduler_name == "dependency") scheduler = std::unique_ptr<MemoryScheduler>(new DependencyAwareMemoryScheduler(context, status, events));
+        // else if (scheduler_name == "maxsize") scheduler = std::unique_ptr<MemoryScheduler>(new MaximumSizePriorityMemoryScheduler(context, status, events));
         else scheduler_hinst = utils::load_dylib("Scheduler", context.at("scheduler.path"), "scheduler_entry", scheduler);
 
         // Set up events exporter
@@ -72,6 +76,11 @@ public:
         std::string tensors_exporter_name = context.at("exporters.tensors");
         if (tensors_exporter_name == "empty") tensors_exporter = std::unique_ptr<exporter::TensorsExporter>(new exporter::TensorsExporter(context.view("exporters.tensors")));
         else tensors_exporter_hinst = utils::load_dylib("Tensors Exporter", context.at("exporters.tensors.path"), "tensors_exporter_entry", tensors_exporter, context.view("exporters.tensors"));
+
+        // Set up schedule exporter
+        std::string schedule_exporter_name = context.at("exporters.schedule");
+        if (schedule_exporter_name == "empty") schedule_exporter = std::unique_ptr<exporter::ScheduleExporter>(new exporter::ScheduleExporter(context.view("exporters.schedule")));
+        else schedule_exporter_hinst = utils::load_dylib("Schdeule Exporter", context.at("exporters.schedule.path"), "schedule_exporter_entry", schedule_exporter, context.view("exporters.schedule"));
     }
 
     virtual void init() override {
@@ -83,15 +92,7 @@ public:
 
     virtual void submitMemoryStatus(const status::MemoryStatus& _status) override {
         status = _status;
-        for (auto &s : status.getTensors()) {
-            status::TensorPres pres = status.referenceTensor(s);
-            tensors_exporter->onTensor(pres.get());
-        }
-        for (auto &s : status.getOperators()) {
-            status::OperatorPres pres = status.referenceOperator(s);
-            tensors_exporter->onOperator(pres.get());
-        }
-        tensors_exporter->onEntry(status.getEntry());
+        tensors_exporter->onTensors(status);
     }
 
     virtual void start() override {
@@ -119,19 +120,21 @@ public:
         if (!inited) throw uninited_exception();
         if (!started) throw uninited_exception();
 
-        // switch (event.type) {
-        //     case events::MemoryEventType::allocate:
-        //         status.recordMemoryAllocateEvent(event.tensor);
-        //         break;
-        //     case events::MemoryEventType::free:
-        //         status.recordMemoryFreeEvent(event.tensor);
-        //         break;
-        //     default:
-        //         break;
-        // }
-
+        std::unique_lock<std::mutex> l{events_m};
         events.submitEvent(event);
-        events_exporter->onEvent(event);
+        events_exporter->onMemoryEvent(event);
+        l.unlock();
+        scheduler->submitEvent(event);
+    }
+
+    virtual void submitEvent(const events::ExecutionEvent& event) override {
+        if (!inited) throw uninited_exception();
+        if (!started) throw uninited_exception();
+
+        std::unique_lock<std::mutex> l{events_m};
+        events.submitEvent(event);
+        events_exporter->onExecutionEvent(event);
+        l.unlock();
         scheduler->submitEvent(event);
     }
 
@@ -144,7 +147,8 @@ public:
             status::TensorPres pres = status.referenceTensor(x.first);
             pres.setFragment(x.second);
         }
-        return scheduler->getScheduleEvents();
+        schedule_exporter->onScheduleEvents(re);
+        return re;
     }
 
     /**

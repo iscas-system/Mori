@@ -10,37 +10,51 @@
 extern "C" __attribute__((visibility("default"))) int tensors_exporter_entry(std::unique_ptr<mori::exporter::TensorsExporter>& ptr, const mori::Context::View& _context);
 
 namespace mori {
+namespace status {
+
+static void to_json(nlohmann::json& obj, const TensorPres& pres) {
+    obj["name"] = pres.getName();
+    obj["size"] = pres.getSize();
+    obj["type"] = status::utils::get_tensor_type_str(pres.getType());
+    obj["persistent"] = pres.isPersistent();
+    obj["transient"]  = pres.isTransient();
+}
+
+static void to_json(nlohmann::json& obj, const OperatorPres& pres) {
+    obj["name"] = pres.getName();
+    obj["backprop"] = pres.isBackwardPropagation();
+    obj["tensors"] = pres.getTensors();
+    obj["prevs"] = pres.getPrevs();
+    obj["posts"] = pres.getPosts();
+}
+
+}   // namespace status
+
 namespace exporter {
 
 using json = nlohmann::json;
 
 struct JSONTensorsExporter : public TensorsExporter {
     JSONTensorsExporter(const Context::View& context): TensorsExporter(context) {}
-    virtual void onTensor(const status::Tensor& tensor) override {
+    virtual void onTensors(status::MemoryStatus& status) const override {
         json obj;
-        obj["catagory"] = "tensor";
-        obj["name"] = tensor.getName();
-        obj["size"] = tensor.getSize();
-        obj["type"] = status::util::get_tensor_type_str(tensor.getType());
-        obj["persistent"] = tensor.isPersistant();
 
-        export_method->exportMessage(obj.dump());
-    }
-    virtual void onOperator(const status::Operator& operator_status) override {
-        json obj;
-        obj["catagory"] = "operator";
-        obj["name"] = operator_status.getName();
-        obj["backprop"] = operator_status.isBackwardPropagation();
-        obj["tensors"] = operator_status.getTensors();
+        obj["tensors"] = json();
+        obj["operators"] = json();
 
-        export_method->exportMessage(obj.dump());
-    }
-    virtual void onEntry(const std::string& op) override {
-        json obj;
-        obj["catagory"] = "entry";
-        obj["operator"] = op;
+        for (auto &s : status.getTensors()) {
+            status::TensorPres pres = status.referenceTensor(s);
+            obj["tensors"][s] = pres;
+        }
+        for (auto &s : status.getOperators()) {
+            status::OperatorPres pres = status.referenceOperator(s);
+            obj["operators"][s] = pres;
+        }
 
-        export_method->exportMessage(obj.dump());
+        obj["entry"] = status.getEntry();
+        obj["execution_order"] = status.getExecutionOrder();
+
+        export_method->exportMessage(obj.dump(2));
     }
 };  // struct JSONTensorExporter
 

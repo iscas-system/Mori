@@ -1,9 +1,9 @@
 #pragma once
 
 namespace mori {
-namespace util {
+namespace utils {
 
 
 
-}   // namespace util
+}   // namespace utils
 }   // namespace mori

@@ -7,8 +7,8 @@ namespace mori {
 struct MemoryManager {
 public:
     // Basie memory management methods.
-    virtual void* allocateDevice(size_t size) =0;
-    virtual void* allocateHost(size_t size) =0;
+    virtual void* allocateDevice(size_t size, bool transient = false) = 0;
+    virtual void* allocateHost(size_t size) = 0;
     virtual void* allocate(size_t size) { return allocateDevice(size); }
 
     virtual void copyIn(void* host_address, void* device_address, size_t size) = 0;

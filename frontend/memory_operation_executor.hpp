@@ -224,13 +224,15 @@ private:
 
                         // Process memory section merging.
                          if (tensor.isMergeable(section->offset)) {
-                            assert(executor.memory_manager->merge(device_address, (uint8_t*)device_address + section->size));
+                            bool res = executor.memory_manager->merge(device_address, (uint8_t*)device_address + section->size);
+                            assert(res);
                             executor.layout.recordMemoryMergeEvent(device_address, (uint8_t*)device_address + section->size);
                             tensor.merge(section->offset);
                         }
                         const status::MemorySection* section_prev = section->prev();
                         if (section_prev != nullptr && tensor.isMergeable(section_prev->offset)) {
-                            assert(executor.memory_manager->merge(section_prev->device_address, device_address));
+                            bool res = executor.memory_manager->merge(section_prev->device_address, device_address);
+                            assert(res);
                             executor.layout.recordMemoryMergeEvent(section_prev->device_address, device_address);
                             section = &(tensor.merge(section_prev->offset));
                         }
@@ -321,7 +323,8 @@ private:
                         freed_size += section->size;
                         if (tensor.isMergeable(section->offset)) {
                             if (section->status != status::MemoryStatusType::none) {
-                                assert(executor.memory_manager->merge(section->device_address, section->next()->device_address));
+                                bool res = executor.memory_manager->merge(section->device_address, section->next()->device_address);
+                                assert(res);
                                 executor.layout.recordMemoryMergeEvent(section->device_address, section->next()->device_address);
                             }
                             tensor.merge(section->offset);
@@ -329,7 +332,8 @@ private:
                         const status::MemorySection* section_prev = section->prev();
                         if (section_prev != nullptr && tensor.isMergeable(section_prev->offset)) {
                             if (section->status != status::MemoryStatusType::none) {
-                                assert(executor.memory_manager->merge(section_prev->device_address, section->device_address));
+                                bool res = executor.memory_manager->merge(section_prev->device_address, section->device_address);
+                                assert(res);
                                 executor.layout.recordMemoryMergeEvent(section_prev->device_address, section->device_address);
                             }
                             section = &(tensor.merge(section_prev->offset));
