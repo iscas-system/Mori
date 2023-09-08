@@ -3,8 +3,8 @@
 #include <string>
 #include <chrono>
 
-#include "includes/application_stage.hpp"
-#include "includes/event_utils.hpp"
+#include "includes/symbols.hpp"
+#include "includes/utils.hpp"
 
 namespace mori {
 namespace events {

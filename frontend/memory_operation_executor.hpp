@@ -313,7 +313,7 @@ private:
         virtual void freeHost(status::TensorPres& tensor, size_t size) override {
             if (tensor.getSize() < size) throw status::tensor_invalid("Freeing size larger than tensor size.");
             size_t freed_size = 0;
-            const status::MemorySection* section = &(tensor.getFirstSection());
+            const status::MemorySection* section = &(tensor.getLastSection());
             do {
                 switch (section->status) {
                     case status::MemoryStatusType::host:
@@ -344,7 +344,7 @@ private:
                     default:
                         break;
                 }
-                section = section->next();
+                section = section->prev();
             } while (section != nullptr);
         }
         virtual void fragment(status::TensorPres& tensor) override {
@@ -388,41 +388,91 @@ public:
     //     tensor.setAllocated(device_address);
     // }
 
+    /**
+     * Copy in tensor data from host memory to device memory with specific size.
+     * Copy from the last section that located only on host.
+     * @param tensor Tensor to be copied in
+     * @param size   Size to be copied in
+    */
     void copyIn(status::TensorPres& tensor, size_t size) {
         impl->copyIn(tensor, size);
     }
 
+    /**
+     * Copy out tensor data from device memory to host memory with specific size.
+     * Copy from the first section that located only on device.
+     * @param tensor Tensor to be copied out
+     * @param size   Size to be copied out
+    */
     void copyOut(status::TensorPres& tensor, size_t size) {
         impl->copyOut(tensor, size);
     }
 
+    /**
+     * Free device memory with specific size.
+     * Free from the first section that located on device
+     * @param tensor Tensor to be freed on device
+     * @param size   Size to be freed on device
+    */
     void freeDevice(status::TensorPres& tensor, size_t size) {
        impl->freeDevice(tensor, size);
     }
 
+    /**
+     * Free host memory with specific size.
+     * Free from the last section that located on host
+     * @param tensor Tensor to be freed on host
+     * @param size   Size to be freed on host
+    */
     void freeHost(status::TensorPres& tensor, size_t size) {
         impl->freeHost(tensor, size);
     }
 
+    /**
+     * Swap in tensor data from host memory to device memory with specific size.
+     * Swap from the first section that located only on host.
+     * @param tensor Tensor to be copied in
+     * @param size   Size to be copied in
+    */
     void swapIn(status::TensorPres& tensor, size_t size) {
         copyIn(tensor, size);
         freeHost(tensor, size);
     }
 
+    /**
+     * Swap out tensor data from device memory to host memory with specific size.
+     * Swap from the first section that located only on device.
+     * @param tensor Tensor to be copied out
+     * @param size   Size to be copied out
+    */
     void swapOut(status::TensorPres& tensor, size_t size) {
         copyOut(tensor, size);
         freeDevice(tensor, size);
     }
 
+    /**
+     * Free device and host memory with specific size.
+     * Free from the first section that located on device or host
+     * @param tensor Tensor to be freed on device and host
+     * @param size   Size to be freed on device and host
+    */
     void free(status::TensorPres& tensor, size_t size) {
         freeDevice(tensor, size);
         freeHost(tensor, size);
     }
 
+    /**
+     * Place fragment for the tensor
+     * @param tensor Tensor to be placed fragment
+    */
     void fragment(status::TensorPres& tensor) {
         impl->fragment(tensor);
     }
 
+    /**
+     * Release and fuse the fragment for the tensor
+     * @param tensor Tensor to be fused
+    */
     void fuse(status::TensorPres& tensor) {
         impl->fuse(tensor);
     }

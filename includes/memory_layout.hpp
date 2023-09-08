@@ -3,12 +3,14 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <shared_mutex>
 
 #include "includes/memory_info.hpp"
-#include "includes/address_utils.hpp"
+#include "includes/symbols.hpp"
+#include "includes/utils.hpp"
 #include "includes/exceptions/memory_exceptions.hpp"
 #include "includes/exceptions/status_exceptions.hpp"
 
@@ -173,10 +175,12 @@ struct MemoryRegion final {
 struct Block final {
     MemoryBlockType type;
     std::map<void*, MemoryRegion> regions;
-    std::shared_mutex m;
+    mutable std::shared_mutex m;
+    size_t total_size;
 
     Block(MemoryBlockType block_type, void* address, size_t size) {
         type = block_type;
+        total_size = size;
         MemoryRegion s;
         s.address = address;
         s.size    = size;
@@ -185,14 +189,21 @@ struct Block final {
     Block(const Block& block) {
         type    = block.type;
         regions = block.regions;
+        total_size = block.total_size;
     }
     Block(Block&& block) {
         type    = block.type;
         regions = std::move(block.regions);
+        total_size = block.total_size;
     }
 };  // struct Block
 
+struct MemoryDefragmentationExecutor;
+
 struct MemoryLayout final {
+private:
+    friend struct MemoryDefragmentationExecutor;
+
 private:
     std::map<void*, Block> blocks;
     // std::shared_mutex m;
@@ -200,10 +211,15 @@ private:
     size_t align_size;
 
 protected:
+    inline std::map<void*, Block>::const_iterator locateMemoryBlock(void* address) const {
+        auto bp = blocks.upper_bound(address);
+        if (bp == blocks.begin()) return blocks.cend();
+        return std::prev(bp);
+    }
     inline std::map<void*, Block>::iterator locateMemoryBlock(void* address) {
         auto bp = blocks.upper_bound(address);
         if (bp == blocks.begin()) return blocks.end();
-        return --bp;
+        return std::prev(bp);
     }
 
 public:
@@ -219,48 +235,51 @@ public:
         align_size  = info.device.align_size;
     }
 
-    inline bool isRegionExist(void* address) {
+    bool isRegionExist(void* address, Direction direction = Direction::post) const {
         auto bp = locateMemoryBlock(address);
         if (bp == blocks.end()) return false;
         std::shared_lock<std::shared_mutex> l{bp->second.m};
         auto& regions = bp->second.regions;
-        return regions.find(address) != regions.end();
+        if (direction == Direction::post) return regions.find(address) != regions.end();
+        else return regions.find(address) != regions.begin();
     }
-    inline MemoryRegion getMemoryRegion(void* address) {
+    MemoryRegion getMemoryRegion(void* address, Direction direction = Direction::post) const {
         auto bp = locateMemoryBlock(address);
         if (bp == blocks.end()) throw memory_unmanaged();
         std::shared_lock<std::shared_mutex> l{bp->second.m};
         auto& regions = bp->second.regions;
         auto sp = regions.find(address);
-        if (sp == regions.end()) throw memory_unmanaged();
-        return sp->second;
+        if (direction == Direction::post) {
+            if (sp == regions.end()) throw memory_unmanaged();
+            return sp->second;
+        } else {
+            if (sp == regions.begin()) throw memory_unmanaged();
+            return std::prev(sp)->second;
+        }
     }
 
-    inline bool isPersistent(void* address) {
+    bool isPersistent(void* address) const {
         auto bp = locateMemoryBlock(address);
         if (bp == blocks.end()) throw memory_unmanaged();
         std::shared_lock<std::shared_mutex> l{bp->second.m};
         return bp->second.type == MemoryBlockType::persistent;
     }
-    inline bool isTransient(void* address) {
+    bool isTransient(void* address) const {
         auto bp = locateMemoryBlock(address);
         if (bp == blocks.end()) throw memory_unmanaged();
         std::shared_lock<std::shared_mutex> l{bp->second.m};
         return bp->second.type == MemoryBlockType::transient;
     }
-    inline bool isCommon(void* address) {
+    bool isCommon(void* address) const {
         auto bp = locateMemoryBlock(address);
         if (bp == blocks.end()) throw memory_unmanaged();
         std::shared_lock<std::shared_mutex> l{bp->second.m};
         return bp->second.type == MemoryBlockType::common;
     }
 
-    inline void recordMemoryAllocateEvent(void* address, size_t size, const std::string& tensor, size_t alignment) {
+    void recordMemoryAllocateEvent(void* address, size_t size, const std::string& tensor, size_t alignment) {
         // Since MemoryLayout is only a recorder of memory layout information, no need to implement for malloc and salloc seperately.
-        if (size == 0) {
-            recordMemoryAllocateEvent(address, alignment, tensor, alignment);
-            return;
-        }
+        if (size == 0) return recordMemoryAllocateEvent(address, alignment, tensor, alignment);
 
         auto bp = blocks.upper_bound(address);
         assert(bp != blocks.begin());
@@ -298,13 +317,13 @@ public:
         p->second.name      = tensor;
         p->second.allocated = true;
     }
-    inline void recordMemoryAllocateEvent(void* address, size_t size, const std::string& tensor) {
+    void recordMemoryAllocateEvent(void* address, size_t size, const std::string& tensor) {
         if (!utils::memory_address_aligned(address, align_size)) throw memory_exception(address, "Memory address not aligned.");
         size_t aligned_size = utils::get_memory_aligned_size(size, align_size);
         if (aligned_size == 0) aligned_size = align_size;
         recordMemoryAllocateEvent(address, aligned_size, tensor, align_size);
     }
-    inline void recordMemoryFreeEvent(void* address, const std::string& tensor = "") {        
+    void recordMemoryFreeEvent(void* address, const std::string& tensor = "") {        
         auto bp = locateMemoryBlock(address);
         if (bp == blocks.end()) throw memory_not_allocated(address);
 
@@ -333,7 +352,7 @@ public:
             regions.erase(p);
         }
     }
-    inline void recordMemorySplitEvent(void* address, size_t size) {
+    void recordMemorySplitEvent(void* address, size_t size) {
         auto bp = locateMemoryBlock(address);
         if (bp == blocks.end()) throw memory_not_allocated(address);
 
@@ -349,7 +368,7 @@ public:
         regions.emplace(s.address, s);
         p->second.size = size;
     }
-    inline void recordMemoryMergeEvent(void* left, void* right) {
+    void recordMemoryMergeEvent(void* left, void* right) {
         auto bp = locateMemoryBlock(left);
         if (bp == blocks.end()) throw memory_not_allocated(left);
 

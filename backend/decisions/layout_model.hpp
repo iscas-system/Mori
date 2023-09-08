@@ -199,29 +199,26 @@ protected:
             while (ql != lowers.end() && qu != uppers.end()) {  // If ql or qu reaches the end of layer, no need to split the lower layer tensors.
                 Node& nl = nodes.at(*ql);
                 Node& nu = nodes.at(*qu);
-                if (nl.upper_remaining_size > nu.lower_remaining_size) {
-                    // Lower layer node along with the fragment larger than upper layer node.
-                    nl.region.sections.push_back(nu.lower_remaining_size);
-                    nl.upper_remaining_size -= nu.lower_remaining_size;
 
-                    // The nu should be fully covered by nl.
-                    nu.lower_remaining_size = 0;
+                size_t size_sectioned = nl.upper_remaining_size > nu.lower_remaining_size ? nu.lower_remaining_size : nl.upper_remaining_size;
+                if (size_sectioned >= smin) nl.region.sections.push_back(size_sectioned);
+                else nl.region.sections.back() += size_sectioned;
+                nl.upper_remaining_size -= size_sectioned;
+                nu.lower_remaining_size -= size_sectioned;
 
-                    // Process of fragment.
+                // Process of fragment.
+                if (nl.upper_remaining_size > 0) {
                     size_t size_frag = nl.upper_remaining_size > nu.lower_fragment_remaining_size ? nu.lower_fragment_remaining_size : nl.upper_remaining_size;
-                    nl.upper_remaining_size -= size_frag;
+                    nl.upper_remaining_size          -= size_frag;
                     nu.lower_fragment_remaining_size -= size_frag;
-                } else {
-                    // The remaining lower tensor should be swapped out.
-                    if (nl.upper_remaining_size >= smin) nl.region.sections.push_back(nl.upper_remaining_size);
-                    else nl.region.sections.back() += nl.upper_remaining_size;
-                    nu.lower_remaining_size -= nl.upper_remaining_size;
-                    nl.upper_remaining_size = 0;
-
-                    // Process of fragment.
-                    size_t size_frag = nl.upper_fragment_remaining_size > nu.lower_remaining_size ? nu.lower_remaining_size : nl.upper_fragment_remaining_size;
+                } else if (nu.lower_remaining_size > 0) {
+                    size_t size_frag = nu.lower_remaining_size > nl.upper_fragment_remaining_size ? nl.upper_fragment_remaining_size : nu.lower_remaining_size;
+                    nu.lower_remaining_size          -= size_frag;
                     nl.upper_fragment_remaining_size -= size_frag;
-                    nu.lower_remaining_size -= size_frag;
+                } else {
+                    size_t size_frag = nl.upper_fragment_remaining_size > nu.lower_fragment_remaining_size ? nu.lower_fragment_remaining_size : nl.upper_fragment_remaining_size;
+                    nl.upper_fragment_remaining_size -= size_frag;
+                    nu.lower_fragment_remaining_size -= size_frag;
                 }
 
                 nl.posts.push_back(&nu);

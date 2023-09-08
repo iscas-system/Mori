@@ -11,7 +11,7 @@ build_dir:
 	@mkdir -p build
 
 header: build_dir
-	@$(QUOM) -I . frontend/libmori.hpp build/libmori.hpp > /dev/null
+	@$(QUOM) -I . frontend/frontend.hpp build/libmori.hpp > /dev/null
 
 library: build_dir
 	@$(CC) -I . -std=$(STD) -shared -fPIC -o build/libmori.so backend/backend_entry.cpp

@@ -62,9 +62,9 @@ public:
 
         // Set up scheduler
         std::string scheduler_name = context.at("scheduler");
-        if (scheduler_name == "fifo") scheduler = std::unique_ptr<MemoryScheduler>(new FIFOMemoryScheduler(context, status, events));
-        // else if (scheduler_name == "dependency") scheduler = std::unique_ptr<MemoryScheduler>(new DependencyAwareMemoryScheduler(context, status, events));
-        // else if (scheduler_name == "maxsize") scheduler = std::unique_ptr<MemoryScheduler>(new MaximumSizePriorityMemoryScheduler(context, status, events));
+        if (scheduler_name == "section") scheduler = std::unique_ptr<MemoryScheduler>(new SectionAwareMemoryScheduler(context, status, events));
+        else if (scheduler_name == "dependency") scheduler = std::unique_ptr<MemoryScheduler>(new DependencyAwareMemoryScheduler(context, status, events));
+        else if (scheduler_name == "execution") scheduler = std::unique_ptr<MemoryScheduler>(new ExecutionTimeAwareMemoryScheduler(context, status, events));
         else scheduler_hinst = utils::load_dylib("Scheduler", context.at("scheduler.path"), "scheduler_entry", scheduler);
 
         // Set up events exporter

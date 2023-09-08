@@ -8,7 +8,7 @@
 #include <cstdlib>
 #include <cassert>
 
-#include "frontend/libmori.hpp"
+#include "frontend/frontend.hpp"
 
 #define DEVICE_MEM 2048
 #define COMMON_MEM 1536
@@ -87,13 +87,16 @@ public:
         current_posi = device.begin();
     }
 
-    virtual void* allocateDevice(size_t size, bool transient = false) override {
+    virtual void* allocateDevice(size_t size) override {
         std::unique_lock<std::shared_mutex> l{dm};
 
         void* re = nullptr;
-        if (!transient) re = allocateDeviceGTM(size);
-        if (re == nullptr) re = allocateDeviceBestFit(size);
-        return re;
+        // if (!transient) re = allocateDeviceGTM(size);
+        // if (re == nullptr) re = allocateDeviceBestFit(size);
+
+        // return re;
+
+        return allocateDeviceGTM(size);
     }
 
     virtual void* allocateHost(size_t size) override {

@@ -38,13 +38,13 @@ protected:
     typedef Logger&(*func)(Logger&);
 
 protected:
-    LogLevel default_level;
-
+    std::unordered_map<std::thread::id, LogLevel> default_levels;
     std::unordered_map<std::thread::id, std::ostringstream> sls;
-    std::shared_mutex tm;
+    mutable std::shared_mutex dm;
+    mutable std::shared_mutex tm;
 
     std::ostringstream sg;
-    std::mutex sm;
+    mutable std::mutex sm;
 
     template <typename T>
     void submitInternal(const T& info) {
@@ -66,8 +66,23 @@ protected:
     virtual void log(LogLevel level, const std::string& log) {}
 
 public:
-    inline void setDefaultLogLevel(LogLevel level) { default_level = level; }
-    inline LogLevel getDefaultLogLevel() const { return default_level; }
+    inline void setDefaultLogLevel(LogLevel level) {
+        std::shared_lock<std::shared_mutex> l{dm};
+        auto p = default_levels.find(std::this_thread::get_id());
+        if (p == default_levels.end()) {
+            l.unlock();
+            std::unique_lock<std::shared_mutex> lu{dm};
+            p = default_levels.emplace(std::this_thread::get_id(), level).first;
+            lu.unlock();
+            l.lock();
+        } default_levels.at(std::this_thread::get_id()) = level; 
+    }
+    inline LogLevel getDefaultLogLevel() const { 
+        std::shared_lock<std::shared_mutex> l{dm};
+        auto p = default_levels.find(std::this_thread::get_id());
+        if (p == default_levels.end()) return LogLevel::debug;
+        return p->second;
+    }
 
     void flush(LogLevel level) {
         std::unique_lock<std::mutex> ls{sm};
@@ -86,7 +101,7 @@ public:
         sl.str("");
         
     }
-    void flush() { flush(default_level); }
+    void flush() { flush(getDefaultLogLevel()); }
 
     template <typename T>
     void submit(LogLevel level, const T& entry) {
@@ -94,10 +109,10 @@ public:
         flush(level);
     };
     template <typename T>
-    inline void submit(const T& entry) { submit(default_level, entry); }
+    inline void submit(const T& entry) { submit(getDefaultLogLevel(), entry); }
 
     Logger& operator<<(LogLevel level) {
-        default_level = level;
+        setDefaultLogLevel(level);
         return *this;
     }
     Logger& operator<<(func _func) {

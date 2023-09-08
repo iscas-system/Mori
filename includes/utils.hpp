@@ -1,13 +1,23 @@
 #pragma once
 
+#include <chrono>
+#include <string>
 #include <cmath>
 #include <sstream>
 
 namespace mori {
 namespace utils {
 
+static long get_timestamp_val(const std::chrono::steady_clock::time_point& timestamp) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(timestamp.time_since_epoch()).count();
+}
+
 inline static void* address_offset(void* address, size_t size) {
     return (uint8_t*)address + size;
+}
+
+inline static size_t address_distance(void* dst, void* src) {
+    return (uint8_t*)dst - (uint8_t*)src;
 }
 
 // inline static size_t get_memory_block(void* address, size_t size) {

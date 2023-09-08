@@ -70,6 +70,8 @@ public:
 private:
     std::unordered_set<std::string> enabled_synchronization_labels;
 
+    bool strong_synchronization = false;
+
 public:
     Lane execution_lane;
     Lane transferring_lane;
@@ -103,7 +105,7 @@ protected:
                 total_execution_time = 0;
             } else {
                 ptrans->second.span = 0;
-                total_execution_time = total_execution_time - total_transferring_time;
+                total_execution_time = strong_synchronization ? (total_execution_time - total_transferring_time) : 0;
             }
             ++ptrans;
         }
@@ -143,6 +145,9 @@ public:
     void setSynchronizationEnabled(const std::string& _label) {
         enabled_synchronization_labels.insert(_label);
     }
+
+    inline bool isStrongSynchronization() const { return strong_synchronization; }
+    void setStrongSynchronization(bool _strong_synchronization) { strong_synchronization = _strong_synchronization; }
 
     void analyze() {
         analyzeSynchronization();

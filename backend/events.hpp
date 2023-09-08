@@ -83,7 +83,7 @@ public:
     EventSet(const EventSet&) = default;
     EventSet(EventSet&&)      = default;
 
-    EventSet select() { return *this; }
+    EventSet select() const { return *this; }
 
     EventSet& where(const std::function<bool(const std::pair<int, T>&)> f) {
         preds.push_back(f);
@@ -145,7 +145,9 @@ inline EventSet<ExecutionEvent> Events::from_execution_events() const {
 
 template <typename T>
 inline static EventSet<T> select(const EventSet<T>& event_set) {
-    return event_set;
+    EventSet<T> re = event_set;
+    re.get();
+    return re;
 }
 
 }   // namespace events

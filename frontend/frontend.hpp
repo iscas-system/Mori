@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * libMori
+ * Copyright Xin 2022-2023.
+*/
+
 #include "frontend/memory_session.hpp"
 #include "frontend/memory_schedule_executor.hpp"
 #include "frontend/memory_manager.hpp"
@@ -34,7 +39,7 @@ protected:
 
         virtual void setEntry(const std::string& _op) = 0;
 
-        virtual void setCallback(CallbackStage stage, const std::function<int(const std::string& tensor, void* ptr)>& callback) = 0;
+        virtual void setCallback(CallbackStage stage, const Callback& callback) = 0;
 
         virtual void start() = 0;
         virtual bool isStarted() const noexcept = 0;
@@ -103,7 +108,7 @@ protected:
             throw uninited_exception();
         }
 
-        virtual void setCallback(CallbackStage stage, const std::function<int(const std::string& tensor, void* ptr)>& callback) override {
+        virtual void setCallback(CallbackStage stage, const Callback& callback) override {
             (*frontend.logger) << LogLevel::error << "Setting callbacks while frontend not initialized." << endl;
             throw uninited_exception();
         }
@@ -184,7 +189,7 @@ protected:
             frontend.memory_status.setEntry(_op);
         }
 
-        virtual void setCallback(CallbackStage stage, const std::function<int(const std::string& tensor, void* ptr)>& callback) override {
+        virtual void setCallback(CallbackStage stage, const Callback& callback) override {
             frontend.executor.setCallback(stage, callback);
             frontend.session.setCallback(stage, callback);
         }
@@ -274,7 +279,7 @@ protected:
             throw inited_exception();
         }
 
-        virtual void setCallback(CallbackStage stage, const std::function<int(const std::string& tensor, void* ptr)>& callback) override {
+        virtual void setCallback(CallbackStage stage, const Callback& callback) override {
             (*frontend.logger) << LogLevel::error << "Setting callbacks while frontend started." << endl;
             throw inited_exception();
         }
@@ -417,7 +422,7 @@ public:
      * @param callback Callback function.
      * @see enum struct mori::CallbackStage
      */
-    inline void setCallback(CallbackStage stage, const std::function<int(const std::string& tensor, void* ptr)>& callback) { impl->setCallback(stage, callback); }
+    inline void setCallback(CallbackStage stage, const Callback& callback) { impl->setCallback(stage, callback); }
 
     /**
      * @brief Start mori frontend. Mori session and background executor will be started.

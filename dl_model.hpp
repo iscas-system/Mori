@@ -6,7 +6,7 @@
 #include <unordered_map>
 #include <mutex>
 
-#include "frontend/libmori.hpp"
+#include "frontend/frontend.hpp"
 
 struct Tensor {
     std::string name = "";
@@ -48,9 +48,12 @@ protected:
     void* allocate(size_t size) {
         void* re = mem_manager.allocate(size);
         if (re != nullptr) return re;
-        
-        frontend.getSession().waitMemory(size);
-        re = mem_manager.allocate(size);
+
+        frontend.getSession().waitMemory(size, [this, &re, &size]() {
+            re = mem_manager.allocate(size);
+            return re != nullptr;
+        });
+
         assert(re != nullptr);
         return re;
     }

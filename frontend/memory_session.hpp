@@ -2,15 +2,15 @@
 
 #include "frontend/backend_handle.hpp"
 #include "frontend/memory_schedule_executor.hpp"
+#include "frontend/memory_defragmentation_executor.hpp"
 #include "frontend/memory_operation_executor.hpp"
 #include "frontend/callbacks.hpp"
 #include "includes/memory_status.hpp"
 #include "includes/memory_event.hpp"
-#include "includes/application_stage.hpp"
+#include "includes/symbols.hpp"
+#include "includes/presentation.hpp"
 
 namespace mori {
-
-// struct Frontend;
 
 /**
  * MemorySession
@@ -19,6 +19,9 @@ namespace mori {
 struct MemorySession final {
 private:
     friend struct Frontend;
+
+public:
+    using MemoryFunction = std::function<bool()>;
 
 public:
     struct Request final {
@@ -198,6 +201,11 @@ private:
 
     MemoryScheduleExecutor& sch_executor;
     MemoryOperationExecutor op_executor;
+    std::atomic<bool> synchronization = false;
+
+    MemoryInfo memory_info;
+    
+    layout::MemoryDefragmentationExecutor defrag_executor;
 
     Callbacks callbacks;
 
@@ -210,6 +218,9 @@ private:
     }
     void setMemoryManager(MemoryManager* _memory_manager) {
         op_executor.setMemoryManager(_memory_manager);
+        defrag_executor.setMemoryManager(_memory_manager);
+
+        memory_info = _memory_manager->getMemoryInfo();
     }
     void setLogger(Logger* _logger) {
         logger = _logger;
@@ -218,8 +229,79 @@ private:
         callbacks.emplace(stage, callback);
     }
 
+    size_t waitTensorMemory(size_t size, const std::string& initial_tensor) {
+        std::string tensor_name = initial_tensor;
+        size_t released_size = 0;
+        while (true) {
+            status::TensorView tensor_view = status.tryReferenceTensor(tensor_name);
+            if (!tensor_view.isReferenced()) break;
+            status::TensorPres tensor_pres = tensor_view.reference();
+            // Do not swap out tensors that already host-only.
+            if (!tensor_pres.isDeviceLocated()) break;
+            uint8_t *device_address_e = (uint8_t *)(tensor_pres.getLastSection().device_address);
+            // // Do not swap out persistent or transient tensors.
+            if (!layout.isCommon(device_address_e)) break;
+
+            // Prepare to swap out this tensor.
+            // Step 1: Locate the first section on device.
+            const status::MemorySection *section = &(tensor_pres.getFirstSection());
+            while (section != nullptr) {
+                if (section->status == status::MemoryStatusType::empty || section->status == status::MemoryStatusType::device || section->status == status::MemoryStatusType::coexist) break;
+                section = section->next();
+            }
+            // Since data located on device, a section will be available finally.
+            assert(section != nullptr);
+
+            // Step 2: Locate prev memory region.
+            released_size = 0;
+            if (layout.isRegionExist(section->device_address, Direction::prev)) {
+                layout::MemoryRegion memory_region_prev = layout.getMemoryRegion(section->device_address, Direction::prev);
+                if (!memory_region_prev.allocated) released_size = memory_region_prev.size;
+            } else released_size = 0;
+
+            // Step 3: Calculate swapping amount
+            device_address_e += tensor_pres.getLastSection().size;
+            if (tensor_pres.getFragment().status == status::MemoryStatusType::empty) device_address_e += tensor_pres.getFragment().size;
+            int releasing_b = tensor_pres.getDeviceSize();
+            if (tensor_pres.getFragment().status == status::MemoryStatusType::empty) releasing_b += tensor_pres.getFragment().size;
+            int releasing_size = releasing_b;
+            if (releasing_size + released_size > size) releasing_size = size - released_size;
+            // If partically swap tensor, reserve aligned size
+            size_t releasing_alignment_size = utils::get_memory_aligned_size(releasing_size, memory_info.device.align_size) - releasing_size;
+            if (releasing_size + releasing_alignment_size <= tensor_pres.getDeviceSize()) releasing_size += releasing_alignment_size;
+            else releasing_alignment_size = 0;
+            op_executor.swapOut(tensor_pres, releasing_size);
+            int releasing_e = tensor_pres.getDeviceSize();
+            if (tensor_pres.getFragment().status == status::MemoryStatusType::empty) releasing_e += tensor_pres.getFragment().size;
+
+            std::string op_name = tensor_pres.getOperatorName();
+            if (callbacks.count(CallbackStage::postSwapOut)) callbacks.at(CallbackStage::postSwapOut)(tensor_name, tensor_pres.getSection(0).host_address);
+            (*logger) << LogLevel::debug << "Operator " << op_name << ": tensor " << tensor_name << " swapped out. (Memory insufficience)" << endl;
+
+            backend_handle.lock()->submitEvent(events::MemoryEvent(op_name, tensor_name, releasing_b - releasing_e, events::MemoryEventType::swapout, stage));
+
+            released_size = released_size + releasing_b - releasing_e - releasing_alignment_size;
+            if (released_size >= size) break;
+
+            assert(releasing_e == 0);
+
+            if (!layout.isRegionExist(device_address_e)) break;
+            layout::MemoryRegion region = layout.getMemoryRegion(device_address_e);
+            if (!region.allocated) {
+                released_size += region.size;
+                if (released_size >= size) break;
+                // Memory demand unmet.
+                device_address_e += region.size;
+                if (!layout.isRegionExist(device_address_e)) break;
+                region = layout.getMemoryRegion(device_address_e);
+            }
+            tensor_name = region.name;
+        }
+        return released_size;
+    }
+
 public:
-    MemorySession(const Context& _context, MemoryScheduleExecutor& _executor, status::MemoryStatus& _status, layout::MemoryLayout& _layout): context(_context), status(_status), layout(_layout), sch_executor(_executor), op_executor(_layout) {}
+    MemorySession(const Context& _context, MemoryScheduleExecutor& _executor, status::MemoryStatus& _status, layout::MemoryLayout& _layout): context(_context), status(_status), layout(_layout), sch_executor(_executor),  op_executor(_layout), defrag_executor(_status, _layout) {}
 
     int getIteration() const { return 0; }
     
@@ -288,6 +370,7 @@ public:
         if (pres.hasFragment()) op_executor.fragment(pres);
 
         layout.recordMemoryAllocateEvent(address, pres.getSize(), tensor);
+        // if (layout.isTransient(address)) defrag_executor.recordMemoryAllocateEvent(address);
 
         // emit memory event
         backend_handle.lock()->submitEvent(events::MemoryEvent(op, tensor, pres.getSize(), events::MemoryEventType::allocate, stage));
@@ -311,77 +394,36 @@ public:
      * @return Memory size released.
      * @note Currently this method adopts a FIFO strategy that the firstly forward-propagating operator will be firstly released. 
      */
-    size_t waitMemory(size_t size) {
-        size_t released_size = sch_executor.waitMemory(size);
+    size_t waitMemory(size_t size, const MemoryFunction& func = []() { return false; }) {
+        if (synchronization) throw status_exception("Memory session already waiting for memory.");
+        utils::Presentation<MemoryScheduleExecutor> presentation(sch_executor);
+        presentation.require();
+        if (func()) return size;
 
-        if (released_size >= size) {
-            (*logger) << LogLevel::info << "Memory insufficient, mori waits for unfinished memory swapping events.";
-            return released_size;
-        }
-        
+        size_t released_size = 0;
         for (auto &op_name : status.getExecutionOrder()) {
             status::OperatorView op_view = status.tryReferenceOperator(op_name);
             if (!op_view.isReferenced()) continue;
             status::OperatorPres op_pres = op_view.reference();
-            // Forward propagation and backward propagation share the same set of operators.
-            if (op_pres.isBackwardPropagation()) continue;
+            // Forward propagation and backward propagation share the same set of tensors.
+            // if (op_pres.isBackwardPropagation()) continue;
 
             for (auto &s : op_pres.getTensors()) { 
                 // Try to release memory from tensors.
-                std::string tensor_name = s;
-                while (true) {
-                    status::TensorView tensor_view = status.tryReferenceTensor(tensor_name);
-                    if (!tensor_view.isReferenced()) break;
-                    status::TensorPres tensor_pres = tensor_view.reference();
-                    // Do not swap out tensors that already host-only.
-                    if (!tensor_pres.isDeviceLocated()) break;
-                    uint8_t* device_address_e = (uint8_t*)(tensor_pres.getLastSection().device_address);
-                    // // Do not swap out persistent or transient tensors.
-                    if (!layout.isCommon(device_address_e)) break;
-
-                    // Prepare to swap out this tensor.
-                    device_address_e += tensor_pres.getLastSection().size;
-                    if (tensor_pres.getFragment().status == status::MemoryStatusType::empty) device_address_e += tensor_pres.getFragment().size;
-                    int releasing_b = tensor_pres.getDeviceSize();
-                    if (tensor_pres.getFragment().status == status::MemoryStatusType::empty) releasing_b += tensor_pres.getFragment().size;
-                    int releasing_size = releasing_b;
-                    if (releasing_size + released_size > size) releasing_size = size - released_size;
-                    op_executor.swapOut(tensor_pres, releasing_size);
-                    int releasing_e = tensor_pres.getDeviceSize();
-                    if (tensor_pres.getFragment().status == status::MemoryStatusType::empty) releasing_e += tensor_pres.getFragment().size;
-
-                    std::string op_name = tensor_pres.getOperatorName();
-                    if (callbacks.count(CallbackStage::postSwapOut)) callbacks.at(CallbackStage::postSwapOut)(tensor_name, tensor_pres.getSection(0).host_address);
-                    (*logger) << LogLevel::debug << "Operator " << op_name << ": tensor " << tensor_name << " swapped out. (Memory insufficience)" << endl;
-
-                    backend_handle.lock()->submitEvent(events::MemoryEvent(op_name, tensor_name, releasing_b - releasing_e, events::MemoryEventType::swapout, stage));
-
-                    released_size += releasing_b - releasing_e;
-                    if (released_size >= size) break;
-
-                    assert(releasing_e == 0);
-
-                    if (!layout.isRegionExist(device_address_e)) break;
-                    layout::MemoryRegion region = layout.getMemoryRegion(device_address_e);
-                    if (region.name == "") {
-                        released_size += region.size;
-                        if (released_size >= size) break;
-                        // Memory demand unmet.
-                        device_address_e += region.size;
-                        if (!layout.isRegionExist(device_address_e)) break;
-                        region = layout.getMemoryRegion(device_address_e);
-                    }
-                    tensor_name = region.name;
-                }
+                released_size = waitTensorMemory(size, s);
                 if (released_size >= size) break;
-                // Releasing failed. Try next tensor.
-                released_size = 0;
             }
             if (released_size >= size) break;
         }
 
+        // Memory demand unmet, try defragmentation.
+        // auto pair = defrag_executor.getTransientBlockAllocatableSize(size);
+        // if (pair.second >= size) defrag_executor.performDefragmentation(size);
+
         if (released_size >= size) (*logger) << LogLevel::info << "Memory insufficient, mori releases " << released_size << " of memory." << endl;
         else (*logger) << LogLevel::info << "Mori memory releasing failed, " << size - released_size << " unmet." << endl;
+
+        func();
         return released_size;
     }
 
@@ -402,6 +444,7 @@ public:
                 case status::MemoryStatusType::device: {
                     void* device_address = section->device_address;
                     pres.setDeviceFreed(section->offset);
+                    // if (layout.isTransient(device_address)) defrag_executor.recordMemoryFreeEvent(device_address);
                     layout.recordMemoryFreeEvent(device_address);
                 }
                 case status::MemoryStatusType::none:

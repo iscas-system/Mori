@@ -46,7 +46,7 @@ protected:
 
     void prepareDefaultParams() {
         defaults.emplace("path", "int://local");
-        defaults.emplace("scheduler", "fifo");
+        defaults.emplace("scheduler", "section");
         defaults.emplace("scheduler.trigger_event", "dependency");
 
         defaults.emplace("exporters.events", "empty");
