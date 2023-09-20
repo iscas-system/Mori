@@ -84,4 +84,8 @@ struct memory_unmanaged : public memory_exception {
 
 };  // struct memory_unmanaged
 
+struct memory_address_invalid : public memory_exception {
+
+};  // struct memory_address_invalid
+
 }   // namespace mori

@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "includes/symbols.hpp"
 #include "includes/exceptions/status_exceptions.hpp"
 
 namespace mori {
@@ -21,11 +22,6 @@ struct TransferringModel {
 };  // struct TransferModel
 
 struct TimeModel final {
-private:
-    enum struct SynchronizationType {
-        prev, post
-    };  // enum struct SynchronizationType
-
 public:
     struct Timespan final {
         std::string target;
@@ -41,12 +37,12 @@ public:
     };  // inner struct Timespan
 
     struct Lane final {
-        SynchronizationType synchronization_type = SynchronizationType::prev;
+        Direction synchronization_type = Direction::prev;
         std::vector<std::pair<std::string, Timespan>> timespans;
         std::string current_synchronization_label = "";
 
         void submitSynchronizationLabel(const std::string synchronization_label) {
-            if (synchronization_type == SynchronizationType::post) {
+            if (synchronization_type == Direction::post) {
                 for (auto p = timespans.rbegin(); p != timespans.rend(); ++p) {
                     if (p->second.synchronization) break;
                     if (p->first != synchronization_label) throw status_exception("Synchronization label mismatch.");
@@ -58,7 +54,7 @@ public:
             current_synchronization_label = synchronization_label;
         }
         void submitTimespan(const std::string synchronization_label, const Timespan& _timespan) {
-            if (synchronization_type == SynchronizationType::post) {
+            if (synchronization_type == Direction::post) {
                 if (synchronization_label == current_synchronization_label) throw status_exception("Synchronization label mismatch.");
             } else {
                 if (synchronization_label != current_synchronization_label) throw status_exception("Synchronization label mismatch.");
@@ -125,8 +121,8 @@ protected:
 
 public:
     TimeModel() {
-        execution_lane.synchronization_type    = SynchronizationType::prev;
-        transferring_lane.synchronization_type = SynchronizationType::post;
+        execution_lane.synchronization_type    = Direction::prev;
+        transferring_lane.synchronization_type = Direction::post;
     }
 
     inline void submitExecutionSynchronization(const std::string& synchronization_label) {

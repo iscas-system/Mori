@@ -236,6 +236,7 @@ public:
     }
 
     bool isRegionExist(void* address, Direction direction = Direction::post) const {
+        if (address == nullptr) throw memory_address_invalid();
         auto bp = locateMemoryBlock(address);
         if (bp == blocks.end()) return false;
         std::shared_lock<std::shared_mutex> l{bp->second.m};
@@ -244,6 +245,7 @@ public:
         else return regions.find(address) != regions.begin();
     }
     MemoryRegion getMemoryRegion(void* address, Direction direction = Direction::post) const {
+        if (address == nullptr) throw memory_address_invalid();
         auto bp = locateMemoryBlock(address);
         if (bp == blocks.end()) throw memory_unmanaged();
         std::shared_lock<std::shared_mutex> l{bp->second.m};
@@ -259,18 +261,21 @@ public:
     }
 
     bool isPersistent(void* address) const {
+        if (address == nullptr) throw memory_address_invalid();
         auto bp = locateMemoryBlock(address);
         if (bp == blocks.end()) throw memory_unmanaged();
         std::shared_lock<std::shared_mutex> l{bp->second.m};
         return bp->second.type == MemoryBlockType::persistent;
     }
     bool isTransient(void* address) const {
+        if (address == nullptr) throw memory_address_invalid();
         auto bp = locateMemoryBlock(address);
         if (bp == blocks.end()) throw memory_unmanaged();
         std::shared_lock<std::shared_mutex> l{bp->second.m};
         return bp->second.type == MemoryBlockType::transient;
     }
     bool isCommon(void* address) const {
+        if (address == nullptr) throw memory_address_invalid();
         auto bp = locateMemoryBlock(address);
         if (bp == blocks.end()) throw memory_unmanaged();
         std::shared_lock<std::shared_mutex> l{bp->second.m};
@@ -278,6 +283,7 @@ public:
     }
 
     void recordMemoryAllocateEvent(void* address, size_t size, const std::string& tensor, size_t alignment) {
+        if (address == nullptr) throw memory_address_invalid();
         // Since MemoryLayout is only a recorder of memory layout information, no need to implement for malloc and salloc seperately.
         if (size == 0) return recordMemoryAllocateEvent(address, alignment, tensor, alignment);
 
@@ -318,12 +324,14 @@ public:
         p->second.allocated = true;
     }
     void recordMemoryAllocateEvent(void* address, size_t size, const std::string& tensor) {
+        if (address == nullptr) throw memory_address_invalid();
         if (!utils::memory_address_aligned(address, align_size)) throw memory_exception(address, "Memory address not aligned.");
         size_t aligned_size = utils::get_memory_aligned_size(size, align_size);
         if (aligned_size == 0) aligned_size = align_size;
         recordMemoryAllocateEvent(address, aligned_size, tensor, align_size);
     }
-    void recordMemoryFreeEvent(void* address, const std::string& tensor = "") {        
+    void recordMemoryFreeEvent(void* address, const std::string& tensor = "") {
+        if (address == nullptr) throw memory_address_invalid();        
         auto bp = locateMemoryBlock(address);
         if (bp == blocks.end()) throw memory_not_allocated(address);
 
@@ -353,6 +361,7 @@ public:
         }
     }
     void recordMemorySplitEvent(void* address, size_t size) {
+        if (address == nullptr) throw memory_address_invalid();
         auto bp = locateMemoryBlock(address);
         if (bp == blocks.end()) throw memory_not_allocated(address);
 
@@ -369,6 +378,7 @@ public:
         p->second.size = size;
     }
     void recordMemoryMergeEvent(void* left, void* right) {
+        if (left == nullptr || right == nullptr) throw memory_address_invalid();
         auto bp = locateMemoryBlock(left);
         if (bp == blocks.end()) throw memory_not_allocated(left);
 

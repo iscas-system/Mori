@@ -63,7 +63,7 @@ private:
                     break;
             }
         }
-        void copyOut(status::TensorPres& tensor, size_t size) override {
+        virtual void copyOut(status::TensorPres& tensor, size_t size) override {
             if (tensor.getSize() < size) throw status::tensor_invalid("Copying out size larger than tensor size.");
             assert(tensor.getSectionCount() == 1);
             const status::MemorySection* section = &(tensor.getFirstSection());
@@ -236,10 +236,8 @@ private:
                             executor.layout.recordMemoryMergeEvent(section_prev->device_address, device_address);
                             section = &(tensor.merge(section_prev->offset));
                         }
-                    }
-                    case status::MemoryStatusType::coexist:
-                    case status::MemoryStatusType::empty:
                         copied_size += section->size;
+                    }
                     default:
                         break;
                 }
@@ -285,7 +283,6 @@ private:
             const status::MemorySection* section = &(tensor.getFirstSection());
             do {
                 switch (section->status) {
-                    case status::MemoryStatusType::device:
                     case status::MemoryStatusType::coexist:
                     case status::MemoryStatusType::empty: {
                         executor.layout.recordMemoryFreeEvent(section->device_address);
@@ -339,7 +336,6 @@ private:
                             section = &(tensor.merge(section_prev->offset));
                         }
                         if (freed_size >= size) return;
-                        break;
                     }
                     default:
                         break;

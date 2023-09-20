@@ -23,6 +23,8 @@ int main(int argc, char** argv) {
     // context["exporters.schedule.method"]          = "file";
     // context["exporters.schedule.method.filename"] = "schedule_export.log";
     context["scheduler"] = "dependency";
+    context["scheduler.dependency.timeaware"] = "true"
+    context["scheduler.dependency.thershold"] = "4";
 
     mori::Frontend frontend(context);
     frontend.setMemoryManager(&mem_manager);

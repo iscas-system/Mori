@@ -472,7 +472,8 @@ public:
 
     ~Frontend() {
         if (impl != &uninited_impl) impl->terminate();
-        
+        assert(impl == &uninited_impl);
+
         backend_handle.reset();
         mem_manager = nullptr;
         logger = nullptr;

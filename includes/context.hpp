@@ -47,7 +47,8 @@ protected:
     void prepareDefaultParams() {
         defaults.emplace("path", "int://local");
         defaults.emplace("scheduler", "section");
-        defaults.emplace("scheduler.trigger_event", "dependency");
+        defaults.emplace("scheduler.dependency.timeaware", "true");
+        defaults.emplace("scheduler.dependency.thershold", "2");
 
         defaults.emplace("exporters.events", "empty");
         defaults.emplace("exporters.events.method", "empty");
@@ -121,7 +122,7 @@ public:
     }
 
     bool signal(const std::string& key) const {
-        return at(key) == "1" ? true : false;
+        return at(key) == "true" ? true : false;
     }
 
     bool isParamExists(const std::string& key) const {

@@ -11,13 +11,13 @@
 				"-std=c++17",
 				"-fdiagnostics-color=always",
 				"-g",
-				"${fileDirname}/backend/*.cpp",
-				"${fileDirname}/*.cpp",
+				"${workspaceFolder}/backend/*.cpp",
+				"${workspaceFolder}/*.cpp",
 				"-o",
-				"${fileDirname}/${fileBasenameNoExtension}"
+				"${workspaceFolder}/main"
 			],
 			"options": {
-				"cwd": "${fileDirname}"
+				"cwd": "${workspaceFolder}"
 			},
 			"problemMatcher": [
 				"$gcc"

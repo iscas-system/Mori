@@ -56,7 +56,7 @@ static MemoryInfo create_default_memory_info(size_t device, size_t host) {
     MemoryInfo re;
     re.device.type       = "gpu";
     re.device.total_size = device;
-    re.device.align_size = 512;     // 512 B
+    re.device.align_size = 256;     // 256 B
     re.host.type         = "cpu";
     re.host.total_size   = host;
     return re;

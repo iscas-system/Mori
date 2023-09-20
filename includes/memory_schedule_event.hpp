@@ -56,10 +56,12 @@ struct ScheduleEvent final {
     std::string postop = "";    // For execution-triggered events, the event should be executed after executing postop.
     long timepoint = 0;          // For timepoing-triggered events, the event should be executed after specificied timepoint.
 
+    bool instant = false;
+
     ScheduleEvent() = default;
     ScheduleEvent(const std::string& _op_name, const std::string& _tensor_name, size_t _size): operator_name(_op_name), tensor_name(_tensor_name), size(_size) {}
-    ScheduleEvent(const std::string& _op_name, const std::string& _tensor_name, size_t _size, ScheduleEventType _event_type, const std::string& _postop): operator_name(_op_name), tensor_name(_tensor_name), size(_size), type(_event_type), postop(_postop) {}
-    ScheduleEvent(const std::string& _op_name, const std::string& _tensor_name, size_t _size, ScheduleEventType _event_type, long _timepoint): operator_name(_op_name), tensor_name(_tensor_name), size(_size), type(_event_type), timepoint(_timepoint) {}
+    ScheduleEvent(const std::string& _op_name, const std::string& _tensor_name, size_t _size, ScheduleEventType _event_type, const std::string& _postop, bool _instant = false): operator_name(_op_name), tensor_name(_tensor_name), size(_size), type(_event_type), postop(_postop), instant(_instant) {}
+    ScheduleEvent(const std::string& _op_name, const std::string& _tensor_name, size_t _size, ScheduleEventType _event_type, long _timepoint, bool _instant = false): operator_name(_op_name), tensor_name(_tensor_name), size(_size), type(_event_type), timepoint(_timepoint), instant(_instant) {}
 };  // struct ScheduleEvent
 
 struct StageScheduleEvents {

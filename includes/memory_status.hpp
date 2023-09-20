@@ -264,7 +264,7 @@ public:
 
     void setReshaped(size_t _size) {
         // Since the allocation takes place in the beginning of the application procedure, there should be only one memory section.
-        if (sections.size() != 1) throw status_exception("Set allocated for sectioned tensor.");
+        if (sections.size() != 1) throw status_exception("Set reshaped for sectioned tensor.");
         assert(sections.begin()->first == 0);
         assert(sections.begin()->second.offset == 0);
         size = _size;

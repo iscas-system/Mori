@@ -62,10 +62,10 @@ public:
 
         // Set up scheduler
         std::string scheduler_name = context.at("scheduler");
-        if (scheduler_name == "section") scheduler = std::unique_ptr<MemoryScheduler>(new SectionAwareMemoryScheduler(context, status, events));
-        else if (scheduler_name == "dependency") scheduler = std::unique_ptr<MemoryScheduler>(new DependencyAwareMemoryScheduler(context, status, events));
-        else if (scheduler_name == "execution") scheduler = std::unique_ptr<MemoryScheduler>(new ExecutionTimeAwareMemoryScheduler(context, status, events));
-        else scheduler_hinst = utils::load_dylib("Scheduler", context.at("scheduler.path"), "scheduler_entry", scheduler);
+        Context::View scheduler_context = context.view("scheduler");
+        if (scheduler_name == "section") scheduler = std::unique_ptr<MemoryScheduler>(new SectionAwareMemoryScheduler(scheduler_context, status, events));
+        else if (scheduler_name == "dependency") scheduler = std::unique_ptr<MemoryScheduler>(new DependencyAwareMemoryScheduler(scheduler_context, status, events));
+        else scheduler_hinst = utils::load_dylib("Scheduler", context.at("scheduler.path"), "scheduler_entry", scheduler, scheduler_context);
 
         // Set up events exporter
         std::string events_exporter_name = context.at("exporters.events");
@@ -80,7 +80,7 @@ public:
         // Set up schedule exporter
         std::string schedule_exporter_name = context.at("exporters.schedule");
         if (schedule_exporter_name == "empty") schedule_exporter = std::unique_ptr<exporter::ScheduleExporter>(new exporter::ScheduleExporter(context.view("exporters.schedule")));
-        else schedule_exporter_hinst = utils::load_dylib("Schdeule Exporter", context.at("exporters.schedule.path"), "schedule_exporter_entry", schedule_exporter, context.view("exporters.schedule"));
+        else schedule_exporter_hinst = utils::load_dylib("Schedule Exporter", context.at("exporters.schedule.path"), "schedule_exporter_entry", schedule_exporter, context.view("exporters.schedule"));
     }
 
     virtual void init() override {

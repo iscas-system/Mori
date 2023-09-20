@@ -35,12 +35,12 @@ public:
     inline void require() { 
         if (presented) throw inited_exception("Target already required.");
         require_func(target);
-        presented = false;
+        presented = true;
     }
     inline void release() {
         if (!presented) throw inited_exception("Target not required.");
-        require_func(target);
-        presented = true;
+        release_func(target);
+        presented = false;
     }
     ~Presentation() {
         if (presented) release();
